@@ -76,9 +76,10 @@ TEST_CASE("phase advances by 2pi*Frequency*dt and wraps") {
 
 TEST_CASE("changing speed does not jump the phase") {
     const auto p = P();
+    // speed=50 keeps the step below one full turn (Frequency=1.0Hz, delta~=0.628 rad), so no wrap occurs.
     const float p1 = SwimAnimation::AdvancePhase(0.f, 0.f, 0.1f, p);
-    const float p2 = SwimAnimation::AdvancePhase(p1, 1000.f, 0.1f, p);
-    REQUIRE(p2 - p1 == Approx(kTwoPi * SwimAnimation::Frequency(1000.f, p) * 0.1f));
+    const float p2 = SwimAnimation::AdvancePhase(p1, 50.f, 0.1f, p);
+    REQUIRE(p2 - p1 == Approx(kTwoPi * SwimAnimation::Frequency(50.f, p) * 0.1f));
 }
 
 TEST_CASE("negative speed treated as zero") {
