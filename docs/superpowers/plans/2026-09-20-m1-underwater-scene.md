@@ -1339,3 +1339,8 @@ git push -u origin feat/m1-scene
 - 방향키 제어·창 포커스(F-05~07 Unreal 계층) — M3.
 - 클릭 도망(F-09~12 Unreal 계층) — M4.
 - 성능 측정·패키징·UBT 앱 마무리 이슈 — M5.
+
+## 구현 중 발견한 후속 항목 (2026-09-20)
+
+- **규칙 계층 벽 조향 (M3)**: `AvoidBoundary`가 바깥 축 성분을 0으로 만들면 벽 근처에서 2D 속도가 0을 지나 반전해 진행 방향이 한 프레임에 180° 바뀐다. M1에서는 `AFishActor::MaxFacingTurnRate`(540°/s) 슬루로 액터 회전만 부드럽게 했다. M3에서 벽을 따라 조향하거나 최소 속도 회전 규칙을 규칙 계층에 넣고 순수 테스트로 고정한다.
+- **UBT 모듈 메타데이터 지연**: 이 머신에서 `Build.sh`가 새 `libUnrealEditor-Aquarium-00NN.dylib`를 쓰지만 `Binaries/Mac/UnrealEditor.modules`는 다음 빌드 호출에서 갱신된다. 헤드리스 테스트 전에 빌드를 두 번 실행하거나 로그의 `InternalLoadLibrary` 줄이 최신 dylib인지 확인한다. SETUP.md에도 기록한다.
