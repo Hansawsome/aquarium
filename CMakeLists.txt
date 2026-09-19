@@ -20,6 +20,7 @@ FetchContent_MakeAvailable(Catch2)
 enable_testing()
 add_executable(rules_tests
   tests/test_vec2.cpp
+  tests/test_nickname.cpp
 )
 target_link_libraries(rules_tests PRIVATE aquarium_rules Catch2::Catch2WithMain)
 
