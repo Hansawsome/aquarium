@@ -32,6 +32,7 @@ add_executable(rules_tests
   tests/test_wander.cpp
   tests/test_swimplane.cpp
   tests/test_swimanimation.cpp
+  tests/test_heading.cpp
 )
 target_link_libraries(rules_tests PRIVATE aquarium_rules Catch2::Catch2WithMain)
 

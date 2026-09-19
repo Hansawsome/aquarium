@@ -5,6 +5,7 @@
 #include "Components/PoseableMeshComponent.h"
 
 #include "aquarium/Bounds.h"
+#include "aquarium/Heading.h"
 #include "aquarium/Motion.h"
 #include "aquarium/SwimAnimation.h"
 #include "aquarium/SwimPlane.h"
@@ -40,8 +41,10 @@ public:
 
 	void SetMesh(USkeletalMesh* Mesh);
 	bool HasBone(FName Bone) const;
-	// Non-const: UPoseableMeshComponent::GetBoneRotationByName is non-const in UE 5.8.
+	// Non-const: UPoseableMeshComponent bone getters are non-const in UE 5.8.
 	FRotator BoneRotation(FName Bone);
+	FVector BoneLocation(FName Bone);     // component space
+	FTransform BoneTransform(FName Bone); // component space
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -56,7 +59,11 @@ private:
 	aquarium::SwimAnimParams AnimParams;
 	TOptional<aquarium::WanderBehavior> Wander; // WanderBehavior has no default ctor
 	float SwimPhase = 0.f;   // accumulated wave phase (rad), advanced per tick
-	float LastYaw = 0.f;
+	float LastHeadingDeg = 0.f;
+	bool bHasHeading = false; // false until the first step with non-zero speed; turn rate is 0 until then
+
+	// Chains Spine0..Tail component-space transforms from the reference pose with the wave angles.
+	void ApplyBodyWave(const std::vector<float>& AnglesDeg);
 
 	static const TArray<FName>& SpineBoneNames();
 };

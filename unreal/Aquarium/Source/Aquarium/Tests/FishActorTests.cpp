@@ -81,4 +81,44 @@ bool FFishActorSpineBonesExist::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorBodyWaveIsChained, "Aquarium.Fish.BodyWaveIsChained",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorBodyWaveIsChained::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnFish(World, 7u);
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Mesh)) return false;
+	Fish->SetMesh(Mesh);
+
+	// Log the reference local axes of a spine bone once, to document which axis bends sideways.
+	const FReferenceSkeleton& RefSkel = Mesh->GetRefSkeleton();
+	const int32 Spine1Index = RefSkel.FindBoneIndex(FName(TEXT("Spine1")));
+	if (TestTrue(TEXT("Spine1 in ref skeleton"), Spine1Index != INDEX_NONE))
+	{
+		const FQuat Q = RefSkel.GetRefBonePose()[Spine1Index].GetRotation();
+		UE_LOG(LogTemp, Display, TEXT("%s"), *FString::Printf(TEXT("Spine1 local ref axes: X=%s Y=%s Z=%s T=%s"),
+			*Q.GetAxisX().ToString(), *Q.GetAxisY().ToString(), *Q.GetAxisZ().ToString(),
+			*RefSkel.GetRefBonePose()[Spine1Index].GetTranslation().ToString()));
+	}
+
+	const FQuat Spine1Comp = Fish->BoneTransform(FName(TEXT("Spine1"))).GetRotation();
+	UE_LOG(LogTemp, Display, TEXT("%s"), *FString::Printf(TEXT("Spine1 component-space axes: X=%s Y=%s Z=%s"),
+		*Spine1Comp.GetAxisX().ToString(), *Spine1Comp.GetAxisY().ToString(), *Spine1Comp.GetAxisZ().ToString()));
+
+	const FVector TailRef = Fish->BoneLocation(FName(TEXT("Tail")));
+	const FVector Spine0Ref = Fish->BoneLocation(FName(TEXT("Spine0")));
+	for (int i = 0; i < 5; ++i) Fish->StepSwim(0.1f);
+	const FVector TailNow = Fish->BoneLocation(FName(TEXT("Tail")));
+	const FVector Spine0Now = Fish->BoneLocation(FName(TEXT("Spine0")));
+	const FVector TailDelta = TailNow - TailRef;
+	UE_LOG(LogTemp, Display, TEXT("%s"), *FString::Printf(TEXT("Tail ref=%s now=%s delta=%s"), *TailRef.ToString(), *TailNow.ToString(), *TailDelta.ToString()));
+	TestTrue(TEXT("tail location moved by chained parent rotations"), TailDelta.Size() > 0.1f);
+	TestTrue(TEXT("tail swings sideways (component Y), not up/down"), FMath::Abs(TailDelta.Y) > FMath::Abs(TailDelta.Z));
+	TestTrue(TEXT("Spine0 location unchanged (rotates about its own head)"), Spine0Now.Equals(Spine0Ref, 1e-3f));
+	TestTrue(TEXT("tail bone rotated by swim wave"),
+		!Fish->BoneRotation(FName(TEXT("Tail"))).IsNearlyZero(1e-3f));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
