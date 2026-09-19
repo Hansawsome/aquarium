@@ -14,7 +14,7 @@ Unreal 5.8 프로젝트(`unreal/Aquarium`)에서 고정 잠수부 시점의 수�
 | 종 | 블루탱 (*Paracanthurus hepatus*) | 납작한 타원 몸통, 강한 파랑·노랑 대비로 실사 판단이 쉬움 |
 | 장면 범위 | 수중 분위기만 — 산호 없음 | 판단을 물고기 유영 품질에 집중 |
 | 이동 구동 | 규칙 계층 `WanderBehavior` + `AvoidBoundary` + `StepMotion` 연동 | "실제 앱이 같은 규칙 코드를 사용" 원칙을 초기에 검증 |
-| 애니메이션 | 뼈대 리깅 + Animation Blueprint 절차적 사인파 | F-13(속도 연동 진폭·주기)을 파라미터로 구현, 이후 도망 동작으로 확장 |
+| 애니메이션 | 뼈대 리깅 + 절차적 사인파. 계산은 규칙 계층의 순수 함수 `SwimAnimation`(속도·시간 → 본 각도)이 하고, `UPoseableMeshComponent`가 본에 적용한다. Animation Blueprint는 쓰지 않는다 (계획 작성 시 변경: 테스트 가능성과 스크립트 재현성) | F-13(속도 연동 진폭·주기)을 파라미터로 구현, 이후 도망 동작으로 확장 |
 
 검토한 대안: 무료 리깅 모델(빠르지만 라이선스·수정 제약), Fab 무료 에셋(공개 저장소 재배포 불가), 키프레임 유영 루프(속도 연동 불리), 머티리얼 WPO 흔들림(몸통·지느러미 분리 제어 어려움).
 
@@ -28,12 +28,12 @@ Unreal 5.8 프로젝트(`unreal/Aquarium`)에서 고정 잠수부 시점의 수�
 - 제작 기록: 사용한 스크립트 또는 단계와 원본 경로를 `docs/ASSETS.md`에 남긴다. 외부 텍스처를 쓰면 출처를 기록한다.
 
 ### Unreal — `unreal/Aquarium`
-- `Content/Fish/BlueTang/`: 스켈레탈 메시, 머티리얼, `ABP_BlueTang`.
+- `Content/Fish/BlueTang/`: 스켈레탈 메시, 머티리얼. 에셋 생성은 `unreal/Aquarium/Scripts/*.py`(에디터 Python)로 재현 가능하게 한다.
 - `Content/Maps/ReefM1.umap`: 수중 장면. `DefaultEngine.ini`의 시작 맵을 이 맵으로 교체.
 - `Source/Aquarium/`:
   - `Aquarium.Build.cs`가 저장소 루트의 `rules/include`를 include 경로에, `rules/src/*.cpp`를 소스에 포함한다(복제 금지).
   - `AFishActor`: 스켈레탈 메시 컴포넌트를 갖고, 매 틱 규칙 계층을 호출해 위치·회전을 갱신한다. 유영 평면(2D `Vec2`)을 월드 좌표로 바꾸는 변환은 이 액터의 책임이다.
-  - `UFishAnimInstance`: `Speed`, `TurnRate`를 노출한다. `ABP_BlueTang`이 이 값으로 척추 본 사인파 진폭·주기와 측면 굽힘을 계산한다.
+  - 애니메이션: `AFishActor`가 매 틱 `aquarium::SwimAnimation::BoneAngles(speed, turnRate, time)`를 호출해 얻은 각도를 `UPoseableMeshComponent::SetBoneRotationByName`으로 척추·꼬리 본에 적용한다.
 
 ### 좌표 변환
 규칙 계층은 x+ = 화면 오른쪽, y+ = 화면 위인 2D 평면을 쓴다. `AFishActor`는 유영 평면의 원점·가로축·세로축(월드 벡터)을 프로퍼티로 갖고, `Vec2 → FVector = Origin + x·Right + y·Up`으로 변환한다. 물고기의 진행 방향은 속도 벡터를 같은 방식으로 변환해 `LookAt` 회전으로 만든다. 깊이 방향은 M1에서 고정한다.
@@ -47,7 +47,7 @@ Tick(dt)
  → StepMotion(motion, dir, params, dt)
  → motion.position = ClampToArea(motion.position, area)
  → SetActorLocation(ToWorld(motion.position)), SetActorRotation(LookAt(ToWorld(velocity)))
- → AnimInstance.Speed = |velocity|, TurnRate = Δyaw/dt
+ → angles = SwimAnimation::BoneAngles(|velocity|, Δyaw/dt, t) → PoseableMesh.SetBoneRotationByName(...)
 ```
 
 ## 장면
@@ -57,7 +57,7 @@ Tick(dt)
 - 물: 지수 높이 안개(푸른 청록, 밀도 높게) + 볼류메트릭 안개로 빛줄기.
 - 바닥: 평면 + Poly Haven CC0 모래 텍스처(사용 파일과 URL을 `docs/ASSETS.md`에 기록).
 - 코스틱: Light Function 머티리얼로 절차적 패닝 무늬.
-- 부유 입자: Niagara 스프라이트, 화면 전체에 소량.
+- 부유 입자: M1에서 제외, M5 품질 조정으로 이월 (계획 작성 시 변경: Niagara를 스크립트로 재현 가능하게 만들 확실한 경로가 없음).
 - 유영 영역: 카메라 앞 가로 6m × 세로 3m 평면, 경계 회피 거리 0.5m.
 
 ## 검증
