@@ -197,7 +197,7 @@ git commit -m "feat: SwimPlane maps 2D swim space to 3D world"
 - Create: `tests/test_swimanimation.cpp`
 - Modify: `CMakeLists.txt`
 
-규칙: 척추 본 `N`개(머리→꼬리)에 대해 각도(도) = `amplitude(speed) * sin(2π * freq(speed) * t - phaseStep * i) + bend(turnRate)`. 진폭·주기는 속도에 비례하되 정지 시에도 작은 "숨쉬기" 진폭을 둔다. 꼬리로 갈수록 위상이 늦고 진폭이 커진다(계수 `1 + i*tailGain`). `bend`는 회전율에 비례한 측면 굽힘, 최대각으로 클램프.
+규칙: 척추 본 `N`개(머리→꼬리)에 대해 각도(도) = `amplitude(speed) * sin(phase - phaseStep * i) + bend(turnRate)`. `phase`는 호출자가 `AdvancePhase(phase, speed, dt)`로 매 틱 누적하는 위상(라디안, 2π로 감쌈)이다 — 절대 시간 `t`를 쓰면 속도 변화 시 위상이 점프해 F-13이 금지하는 순간 반전이 생긴다(2026-09-20 코드 리뷰로 수정). 아래 코드 블록은 최초 계획이며, 실제 구현은 커밋 이력의 수정본을 따른다. 진폭·주기는 속도에 비례하되 정지 시에도 작은 "숨쉬기" 진폭을 둔다. 꼬리로 갈수록 위상이 늦고 진폭이 커진다(계수 `1 + i*tailGain`). `bend`는 회전율에 비례한 측면 굽힘, 최대각으로 클램프.
 
 - [ ] **Step 1: 실패하는 테스트**
 
@@ -838,7 +838,7 @@ private:
     aquarium::MotionParams MotionParamsValue;
     aquarium::SwimAnimParams AnimParams;
     TOptional<aquarium::WanderBehavior> Wander;
-    float SwimTime = 0.f;
+    float SwimPhase = 0.f;   // accumulated wave phase (rad), advanced per tick
     float LastYaw = 0.f;
 
     static const TArray<FName>& SpineBoneNames();
@@ -874,7 +874,7 @@ void AFishActor::InitializeSwim()
     MotionParamsValue.maxSpeed = MaxSpeed; MotionParamsValue.accel = Accel; MotionParamsValue.decel = Decel;
     AnimParams.boneCount = SpineBoneNames().Num();
     Wander.Emplace(Seed, Area, /*arriveRadius*/ 15.f, /*targetLifetime*/ 8.f);
-    SwimTime = 0.f; LastYaw = 0.f;
+    SwimPhase = 0.f; LastYaw = 0.f;
     if (FishMesh) SetMesh(FishMesh);
     const aquarium::Vec3 w = Plane.ToWorld(Motion.position);
     SetActorLocation(FVector(w.x, w.y, w.z));
@@ -902,8 +902,8 @@ void AFishActor::StepSwim(float DeltaSeconds)
         SetActorRotation(Look);
     }
 
-    SwimTime += DeltaSeconds;
-    const std::vector<float> Angles = aquarium::SwimAnimation::BoneAngles(CurrentSpeed(), TurnRate, SwimTime, AnimParams);
+    SwimPhase = aquarium::SwimAnimation::AdvancePhase(SwimPhase, CurrentSpeed(), DeltaSeconds, AnimParams);
+    const std::vector<float> Angles = aquarium::SwimAnimation::BoneAngles(CurrentSpeed(), TurnRate, SwimPhase, AnimParams);
     const TArray<FName>& Bones = SpineBoneNames();
     for (int32 i = 0; i < Bones.Num() && i < static_cast<int32>(Angles.size()); ++i)
     {
