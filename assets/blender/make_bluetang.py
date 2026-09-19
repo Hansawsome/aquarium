@@ -24,6 +24,7 @@ BODY_LEN = 25.0   # cm
 BODY_H = 12.0
 BODY_W = 3.0
 L = BODY_LEN / 2
+PEC_ROOT_Y = BODY_W * 0.45   # lateral offset where pectoral fin plates and PecL/PecR bones attach
 
 # ---------- body ----------
 bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=1.0)
@@ -64,12 +65,12 @@ anal = add_fin("AnalFin",
      (-L * 0.6, 0, -BODY_H * 0.6), (L * 0.05, 0, -BODY_H * 0.75)],
     [(0, 1, 2, 3)])
 pecL = add_fin("PecFinL",
-    [(L * 0.35, BODY_W * 0.45, 0.5), (L * 0.1, BODY_W * 0.45 + 4.5, -1.5),
-     (L * 0.0, BODY_W * 0.45 + 3.5, -2.5), (L * 0.25, BODY_W * 0.45, -1.5)],
+    [(L * 0.35, PEC_ROOT_Y, 0.5), (L * 0.1, PEC_ROOT_Y + 4.5, -1.5),
+     (L * 0.0, PEC_ROOT_Y + 3.5, -2.5), (L * 0.25, PEC_ROOT_Y, -1.5)],
     [(0, 1, 2, 3)])
 pecR = add_fin("PecFinR",
-    [(L * 0.35, -BODY_W * 0.45, 0.5), (L * 0.25, -BODY_W * 0.45, -1.5),
-     (L * 0.0, -BODY_W * 0.45 - 3.5, -2.5), (L * 0.1, -BODY_W * 0.45 - 4.5, -1.5)],
+    [(L * 0.35, -PEC_ROOT_Y, 0.5), (L * 0.25, -PEC_ROOT_Y, -1.5),
+     (L * 0.0, -PEC_ROOT_Y - 3.5, -2.5), (L * 0.1, -PEC_ROOT_Y - 4.5, -1.5)],
     [(0, 1, 2, 3)])
 
 fins = [tail, dorsal, anal, pecL, pecR]
@@ -91,15 +92,17 @@ bpy.ops.object.mode_set(mode='OBJECT')
 
 # ---------- procedural material -> bake ----------
 mat = bpy.data.materials.new("M_BlueTang")
-if mat.node_tree is None:   # Blender < 6.0 still needs use_nodes for a node tree
+if mat.node_tree is None:   # Blender 5.x may return a material without a node tree
     mat.use_nodes = True
 nt = mat.node_tree; nt.nodes.clear()
 out = nt.nodes.new("ShaderNodeOutputMaterial")
 bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled"); bsdf.inputs["Roughness"].default_value = 0.35
+# Geometry > Position is world-space; the masks below rely on the body sitting at the origin.
 geo = nt.nodes.new("ShaderNodeNewGeometry")
 sep = nt.nodes.new("ShaderNodeSeparateXYZ")
 nt.links.new(geo.outputs["Position"], sep.inputs[0])
-# tail mask: x < -L*0.75  -> yellow
+# tail mask: ramps from 0 at x = -L*0.72 to 1 at x = -L*0.80 (yellow toward the tail).
+# From Min > From Max is intentional: an inverted ramp so the factor rises as x decreases.
 tail_ramp = nt.nodes.new("ShaderNodeMapRange")
 tail_ramp.inputs["From Min"].default_value = -L * 0.72; tail_ramp.inputs["From Max"].default_value = -L * 0.80
 nt.links.new(sep.outputs["X"], tail_ramp.inputs["Value"])
@@ -144,6 +147,7 @@ arm = bpy.context.object; arm.name = "BlueTangRig"; arm.data.name = "BlueTangRig
 ebones = arm.data.edit_bones
 for b in list(ebones): ebones.remove(b)
 root = ebones.new("Root"); root.head = (0, 0, 0); root.tail = (0, 0, 1)
+root.use_deform = False   # Root is a transform anchor only; heat weighting must ignore it
 SPINE = 6
 x_head = L * 0.95; x_tail = -L * 0.9
 step = (x_head - x_tail) / SPINE
@@ -155,14 +159,28 @@ for i in range(SPINE):
 tailb = ebones.new("Tail"); tailb.head = prev.tail; tailb.tail = (-L - 6, 0, 0)
 tailb.parent = prev; tailb.use_connect = True
 for name, sign in (("PecL", 1), ("PecR", -1)):
-    pb = ebones.new(name); pb.head = (L * 0.35, sign * BODY_W * 0.45, 0.5)
-    pb.tail = (L * 0.05, sign * (BODY_W * 0.45 + 4.0), -2.0); pb.parent = ebones["Spine1"]
+    pb = ebones.new(name); pb.head = (L * 0.35, sign * PEC_ROOT_Y, 0.5)
+    pb.tail = (L * 0.05, sign * (PEC_ROOT_Y + 4.0), -2.0); pb.parent = ebones["Spine1"]
 bpy.ops.object.mode_set(mode='OBJECT')
 
 # ---------- skinning ----------
 bpy.ops.object.select_all(action='DESELECT'); body.select_set(True); arm.select_set(True)
 bpy.context.view_layer.objects.active = arm
 bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+
+# ---------- rig contract guards ----------
+EXPECTED_BONES = {"Root", "Tail", "PecL", "PecR"} | {f"Spine{i}" for i in range(SPINE)}
+actual_bones = {b.name for b in arm.data.bones}
+assert actual_bones == EXPECTED_BONES, f"bone set mismatch: {sorted(actual_bones)}"
+root_gi = body.vertex_groups["Root"].index if "Root" in body.vertex_groups else -1
+unweighted = 0; root_max_w = 0.0
+for v in body.data.vertices:
+    total = sum(g.weight for g in v.groups)
+    if total < 1e-4: unweighted += 1
+    for g in v.groups:
+        if g.group == root_gi: root_max_w = max(root_max_w, g.weight)
+if unweighted:
+    raise RuntimeError(f"{unweighted} body vertices have no skin weight")
 
 # ---------- save + export ----------
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(ROOT, "BlueTang.blend"))
@@ -185,4 +203,5 @@ scene.render.resolution_x = 1280; scene.render.resolution_y = 720
 scene.render.filepath = os.path.join(EXPORT, "preview.png")
 bpy.ops.render.render(write_still=True)
 
-print("BLUETANG_OK verts=%d bones=%d" % (len(body.data.vertices), len(arm.data.bones)))
+print("BLUETANG_OK verts=%d bones=%d unweighted=%d rootMaxW=%.3f"
+      % (len(body.data.vertices), len(arm.data.bones), unweighted, root_max_w))

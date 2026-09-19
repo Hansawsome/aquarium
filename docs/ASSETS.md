@@ -8,6 +8,8 @@
 |---|---|---|---|---|
 | 블루탱 (BlueTang) | Blender 5.2.2 LTS | `assets/blender/make_bluetang.py` | `assets/blender/BlueTang.blend`, `assets/blender/export/BlueTang.fbx`, `T_BlueTang_BaseColor.png` (2048², 절차적 노드 베이크) | 없음 |
 
+블루탱 비고: `assets/blender/export/preview.png`(EEVEE 미리보기 렌더)도 스크립트 산출물이다. `.blend`/`.fbx`/`preview.png`는 재빌드마다 바이트가 달라진다(타임스탬프·세션 데이터, EEVEE 노이즈). 베이크된 `T_BlueTang_BaseColor.png`는 바이트 동일하다. Subdivision 모디파이어는 의도적으로 생략했다(shade_smooth만 적용).
+
 ## 도입 시 필수 기록
 
 각 에셋마다 이름, 저작자, 원본 URL, 다운로드 날짜, 라이선스 URL/사본, 출처 표기 문구, 수정 여부, 게임 배포 가능 여부, 공개 저장소에 원본 재배포 가능 여부, 로컬 경로를 기록한다.
