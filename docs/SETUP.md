@@ -58,7 +58,22 @@ Python MCP SDK로 등록된 실행 파일을 시작하고 stdio 클라이언트�
 
 **버전 불일치 위험.** 당초 계획은 Epic의 UE 5.8 Mac 문서에 따른 Xcode 26.1.1이었다. 2026-09-20 재확인한 Epic 문서는 UE 5.8에 대해 최소 26.0, 권장 26.1.1을 명시하고 Xcode 26.4는 비호환이라고 적으며 27.x는 언급하지 않는다. Unreal Build Tool은 지원 범위 밖 Xcode를 거부할 수 있으므로, 엔진 설치 후 빈 프로젝트 C++ 컴파일이 실패하면 26.1.1을 `/Applications/Xcode-26.1.1.app`로 병행 설치하고 `xcode-select`로 전환한다. 27.0으로 빌드가 성공하면 그 사실을 여기에 기록한다.
 
-### Unreal Engine와 공식 MCP
+### Unreal Engine — 설치 및 빌드 검증 (2026-09-20)
+
+UE 5.8.2를 Launcher로 설치했다. C++ 프로젝트 골격을 `unreal/Aquarium/`에 만들고(모듈 `Aquarium`, `BuildSettingsVersion.Latest`) 다음을 실제 수행했다.
+
+| 확인 | 명령 | 결과 |
+|---|---|---|
+| 에디터 타깃 컴파일 | `Engine/Build/BatchFiles/Mac/Build.sh AquariumEditor Mac Development -Project=…` | `Result: Succeeded` (18.5초, Xcode 27.0 / LLVM 21.1.6). `Binaries/Mac/libUnrealEditor-Aquarium.dylib` 생성 |
+| 에디터 헤드리스 실행 | `UnrealEditor-Cmd Aquarium.uproject -run=pythonscript -script="print('EDITOR_SMOKE_OK')" -unattended -nullrhi` | 엔진 5.8.2 초기화, 프로젝트 모듈 로드, Python 3.11.8로 `EDITOR_SMOKE_OK` 출력, 종료 코드 0 |
+| 게임 타깃 컴파일 | `Build.sh Aquarium Mac Development -Project=…` | 컴파일·링크 성공, `Binaries/Mac/Aquarium.app` 생성. **단, UBT의 마지막 "App finalization"(xcodebuild PostBuildSync) 단계가 `Touch UBT generated tiles` 스킴 pre-action에서 출력 없이 실패(exit 65)** |
+| 앱 마무리 직접 실행 | UBT 로그에 찍힌 동일한 `xcodebuild … UE_XCODE_BUILD_MODE=PostBuildSync` 명령을 직접 실행 | `BUILD SUCCEEDED`, `codesign -dv`로 ad-hoc 서명 확인 |
+
+첫 시도는 `BuildSettingsVersion.V5`가 5.8 설치형 엔진의 공유 빌드 환경과 충돌해 실패했고 `Latest`로 바꿔 해결했다.
+
+**미해결:** UBT 내부에서만 앱 마무리가 실패한다. 샌드박스 비활성화, `Build/Mac/Resources` 디렉터리 생성, 존재하지 않는 `TMPDIR` 재현 시도로는 원인을 못 찾았다. Xcode 27 + UE 5.8.2 조합 이슈로 추정한다. 컴파일 검증 목적은 달성했으므로 이월하고, M5 패키징(`RunUAT BuildCookRun`) 단계에서 재확인한다. 에디터 GUI 실행은 아직 하지 않았다(헤드리스 commandlet만).
+
+### Unreal 공식 MCP
 
 Epic Launcher 설치와 첫 업데이트를 마쳤고, 2026-09-20 사용자가 Epic 로그인을 완료했다고 보고했다. 같은 날 `LauncherInstalled.dat`의 `InstallationList`는 비어 있어 엔진은 아직 미설치다. 다음은 Launcher에서 Unreal 5.8 안정 릴리스 선택과 macOS 개발 구성요소 설치다. Launcher 설치만으로 엔진 설치 완료로 기록하지 않는다.
 

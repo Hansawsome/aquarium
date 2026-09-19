@@ -1,0 +1,13 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.8",
+	"Category": "",
+	"Description": "Coral reef aquarium for macOS",
+	"Modules": [
+		{
+			"Name": "Aquarium",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

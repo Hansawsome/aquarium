@@ -12,7 +12,7 @@
 | C++ 컴파일러 | Apple clang 21.0.0, arm64 |
 | 선택된 개발자 경로 | `/Applications/Xcode.app/Contents/Developer` (2026-09-20 확인) |
 | 정식 Xcode | **27.0 (27A266a)** 설치, macOS 27.0 SDK. Metal Toolchain 27A266a는 2026-09-20 `xcodebuild -downloadComponent MetalToolchain`으로 추가 설치, `xcrun metal --version` 동작 확인. **주의: Epic 문서상 UE 5.8 권장은 26.1.1, 최소 26.0이며 27.x는 언급 없음(26.4는 명시적 비호환)** |
-| Unreal Engine | 미설치. Epic 로그인 및 엔진 다운로드 필요 |
+| Unreal Engine | **5.8.2** (`5.8.2-56702186+++UE5+Release-5.8`), `/Users/Shared/Epic Games/UE_5.8`, 2026-09-20 Launcher로 설치. 엔진 `Apple_SDK.json`이 Xcode Max 27.9.0·27.0.0 매핑을 포함해 Xcode 27.0 호환 확인 |
 | Epic Games Launcher | Homebrew cask 20.1.4 설치, 첫 실행 업데이트 완료, 사용자 보고로 Epic 로그인 완료(2026-09-20). `LauncherInstalled.dat`의 설치 목록은 비어 있음 |
 | Blender | 5.2.2 LTS, `/Applications/Blender.app`, 실행 확인 |
 | Homebrew | `/opt/homebrew/bin/brew` |
@@ -20,7 +20,7 @@
 | Git LFS | 3.8.0 설치, aquarium 저장소에 `git lfs install --local` 적용 |
 | Superpowers | using-superpowers, brainstorming, writing-plans, test-driven-development, verification-before-completion, systematic-debugging, executing-plans 설치 |
 | Blender MCP | `mcp-for-blender==2.0.0` 설치 및 Codex 등록, MCP 초기화·31개 도구 조회·장면 조회·Python 실행 성공 |
-| Unreal MCP | UE 5.8의 공식 내장 플러그인 사용 예정. 아직 미연결 |
+| Unreal MCP | `Engine/Plugins/Experimental/ModelContextProtocol` 존재 확인. 아직 프로젝트 활성화·연결 안 함 |
 
 ## 2026-09-19 설치 작업
 

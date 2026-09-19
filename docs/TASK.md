@@ -14,7 +14,7 @@
 - [x] 사용자 문서 검토 — 2026-09-19 엔진(Unreal 5 유지) 확정과 함께 승인
 - [x] 상세 TDD 구현 계획 작성과 실행 방식 선택 — `docs/superpowers/plans/2026-09-19-rules-layer.md`, executing-plans로 2026-09-20 실행
 
-## 구현 로드맵 — M0 도구 준비 진행 중
+## 구현 로드맵 — M0 거의 완료, M1 진행 가능
 
 | 단계 | 작업 | 완료 조건 |
 |---|---|---|
@@ -25,12 +25,12 @@
 | M4 | 클릭 도망·회복·애니메이션 | F-09~13 테스트, 중복 입력·중심 적중·모서리 검증 |
 | M5 | macOS 시제품 품질과 배포 | SRS 성능 측정, 패키지 실행, 에셋 출처 확인 |
 
-M0 진행: Blender/CMake/Git LFS 설치와 Blender MCP 연결 검증 완료. 2026-09-20 Xcode 27.0 설치·Metal Toolchain 추가·Epic 로그인 완료(Xcode 27과 UE 5.8 호환은 미확인, SETUP.md 참고). Unreal 엔진 설치·공식 MCP·빈 프로젝트 빌드·패키징 검증은 아직 남아 있다. 상세는 [SETUP.md](SETUP.md).
+M0 진행(2026-09-20): Blender/CMake/Git LFS·Blender MCP 완료. Xcode 27.0 + UE 5.8.2 설치, 엔진 설정으로 호환 확인. `unreal/Aquarium/` C++ 프로젝트의 에디터 타깃 컴파일·헤드리스 에디터 실행·게임 타깃 컴파일 성공. 남은 것: UBT 앱 마무리 단계 실패(직접 xcodebuild는 성공, SETUP.md 미해결 항목), 에디터 GUI 실행 확인, Unreal MCP 연결, 패키징은 M5로 이월. 상세는 [SETUP.md](SETUP.md).
 
 ## 검증 현황
 
 - 규칙 계층(C++17, Unreal 독립) 테스트: **42개 통과** — 2026-09-20, 브랜치 `feat/rules-layer`, 커밋 `52b6dfe`. 클린 빌드 `cmake -S . -B build && cmake --build build -j && ctest --test-dir build` 결과 `100% tests passed out of 42`. 각 태스크는 헤더 부재 컴파일 실패 → 스텁 assertion 실패(RED) → 구현 통과(GREEN) 순서로 진행했고 커밋 단위로 기록됨. 다룬 SRS 항목: F-01, F-02, F-03, F-05, F-06, F-07, F-08, F-10, F-11, F-12, F-14의 규칙 부분.
 - Unreal 연동 계층(F-04 이름표, F-09 레이캐스트, F-13 애니메이션, 입력 이벤트·세션 UI): 미구현 — 엔진 설치 후 별도 계획.
-- Unreal 빌드/화면/성능: 미실행 — 개발 도구 준비 전.
+- Unreal 빌드: 에디터·게임 타깃 컴파일 성공, 헤드리스 에디터 실행 성공 (2026-09-20, SETUP.md). 화면·성능: 미실행.
 - 무료 에셋 다운로드: 없음.
 - 현재 완료 범위: 설계 문서 작성, 일부 개발 도구 설치, Blender MCP 실제 연결 검증.
