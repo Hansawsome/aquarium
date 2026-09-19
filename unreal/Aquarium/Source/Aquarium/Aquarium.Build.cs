@@ -1,3 +1,5 @@
+using System.IO;
+using EpicGames.Core;
 using UnrealBuildTool;
 
 public class Aquarium : ModuleRules
@@ -6,5 +8,18 @@ public class Aquarium : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
+
+		// Engine-independent rules layer lives at the repo root; compile the same sources here (no copies).
+		string RepoRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", ".."));
+		string RulesDir = Path.Combine(RepoRoot, "rules");
+		PublicIncludePaths.Add(Path.Combine(RulesDir, "include"));
+		ConditionalAddModuleDirectory(new DirectoryReference(Path.Combine(RulesDir, "src")));
+		bEnableExceptions = false;
+
+		// Automation tests use FAutomationEditorCommonUtils (editor only).
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("UnrealEd");
+		}
 	}
 }
