@@ -27,6 +27,7 @@ add_executable(rules_tests
   tests/test_motion.cpp
   tests/test_bounds.cpp
   tests/test_flee.cpp
+  tests/test_wander.cpp
 )
 target_link_libraries(rules_tests PRIVATE aquarium_rules Catch2::Catch2WithMain)
 
