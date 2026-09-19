@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.24)
+project(aquarium_rules LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_library(aquarium_rules
+  rules/src/Nickname.cpp
+)
+target_include_directories(aquarium_rules PUBLIC rules/include)
+
+include(FetchContent)
+FetchContent_Declare(
+  Catch2
+  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+  GIT_TAG        v3.5.4
+)
+FetchContent_MakeAvailable(Catch2)
+
+enable_testing()
+add_executable(rules_tests
+  tests/test_vec2.cpp
+)
+target_link_libraries(rules_tests PRIVATE aquarium_rules Catch2::Catch2WithMain)
+
+list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+include(Catch)
+catch_discover_tests(rules_tests)
