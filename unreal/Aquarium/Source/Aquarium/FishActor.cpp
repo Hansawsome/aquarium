@@ -1,5 +1,8 @@
 #include "FishActor.h"
 
+#include "Engine/SkeletalMesh.h"
+#include "ReferenceSkeleton.h"
+
 AFishActor::AFishActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -56,22 +59,38 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	float TurnRate = 0.f;
 	if (CurrentSpeed() > 1e-3f)
 	{
+		const bool bFirstHeading = !bHasHeading;
 		const float HeadingDeg = aquarium::HeadingDeg(Motion.velocity);
-		if (bHasHeading)
+		if (!bFirstHeading)
 		{
 			TurnRate = aquarium::TurnRateDegPerSec(LastHeadingDeg, HeadingDeg, DeltaSeconds);
 		}
 		LastHeadingDeg = HeadingDeg;
 		bHasHeading = true;
 
+		// Build the facing frame from forward and the fixed plane normal (world +X) instead of
+		// FVector::Rotation(): for a YZ-plane forward, Rotation() flips yaw by 180 deg whenever the
+		// velocity crosses world Y = 0 and is degenerate at exactly vertical. X = forward,
+		// Y = lateral = plane normal, Z = their cross product; continuous for every heading.
 		const aquarium::Vec3 F = Plane.Forward(Motion.velocity);
-		SetActorRotation(FVector(F.x, F.y, F.z).Rotation());
+		const FQuat Target = FRotationMatrix::MakeFromXY(FVector(F.x, F.y, F.z), FVector::XAxisVector).ToQuat();
+		// The frame is continuous, but the 2D velocity itself can reverse through zero when the fish
+		// decelerates at a wall and re-accelerates the other way. Slew the facing at a bounded rate so
+		// the body never snaps; the first step after InitializeSwim snaps to its initial heading.
+		const FQuat Current = GetActorQuat();
+		const FQuat Next = bFirstHeading
+			? Target
+			: FMath::QInterpConstantTo(Current, Target, DeltaSeconds, FMath::DegreesToRadians(MaxFacingTurnRate));
+		SetActorRotation(Next);
 	}
 
 	SwimPhase = aquarium::SwimAnimation::AdvancePhase(SwimPhase, CurrentSpeed(), DeltaSeconds, AnimParams);
 	ApplyBodyWave(aquarium::SwimAnimation::BoneAngles(CurrentSpeed(), TurnRate, SwimPhase, AnimParams));
 }
 
+// Future optimization when scaling to many fish: write Body->BoneSpaceTransforms directly for
+// the whole chain and call MarkRefreshTransformDirty() once, instead of one
+// SetBoneTransformByName (name lookup + refresh) per bone.
 void AFishActor::ApplyBodyWave(const std::vector<float>& AnglesDeg)
 {
 	const USkinnedAsset* Asset = Body->GetSkinnedAsset();
@@ -103,9 +122,12 @@ void AFishActor::ApplyBodyWave(const std::vector<float>& AnglesDeg)
 		{
 			break; // chain is broken; later bones would have the wrong parent
 		}
-		// Wave is a rotation about the bone's own sideways axis, applied in the bone's local frame
-		// (about its own head), then the reference local offset, then the parent's chained transform.
-		// UE FTransform: A * B applies A first, so this is Wave -> LocalRef -> Parent.
+		// The wave is a yaw about the bone's local Z (up) axis, so the swing is sideways. This axis
+		// choice is rig-specific: SK_BlueTang is exported with axis_forward='X', axis_up='Z'
+		// (assets/blender/make_bluetang.py), which maps each spine bone's local Z to component +Z.
+		// The BodyWaveIsChained test logs the measured axes. The rotation is applied in the bone's
+		// local frame (about its own head), then the reference local offset, then the parent's
+		// chained transform. UE FTransform: A * B applies A first, so this is Wave -> LocalRef -> Parent.
 		const FTransform Wave(FRotator(0.f, AnglesDeg[static_cast<size_t>(i)], 0.f));
 		const FTransform Comp = Wave * RefPose[BoneIndex] * ParentComp;
 		Body->SetBoneTransformByName(Bones[i], Comp, EBoneSpaces::ComponentSpace);

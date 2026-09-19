@@ -31,6 +31,9 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Swim") float MaxSpeed = 40.f;          // cm/s
 	UPROPERTY(EditAnywhere, Category = "Swim") float Accel = 30.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") float Decel = 40.f;
+	// Max rate the visible facing slews toward the velocity direction (deg/s). Bounds the per-frame
+	// rotation even when the 2D velocity reverses through zero at a wall.
+	UPROPERTY(EditAnywhere, Category = "Swim") float MaxFacingTurnRate = 540.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") TObjectPtr<USkeletalMesh> FishMesh = nullptr;
 
 	// Resets 2D state from the properties above and places the actor at the plane origin.
@@ -43,8 +46,9 @@ public:
 	bool HasBone(FName Bone) const;
 	// Non-const: UPoseableMeshComponent bone getters are non-const in UE 5.8.
 	FRotator BoneRotation(FName Bone);
-	FVector BoneLocation(FName Bone);     // component space
-	FTransform BoneTransform(FName Bone); // component space
+	// Test/diagnostic helpers (component space); not used by gameplay.
+	FVector BoneLocation(FName Bone);
+	FTransform BoneTransform(FName Bone);
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
