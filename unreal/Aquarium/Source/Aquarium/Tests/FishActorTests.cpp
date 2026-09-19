@@ -161,4 +161,46 @@ bool FFishActorFacingIsContinuous::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorBoneAnglesAreContinuous, "Aquarium.Fish.BoneAnglesAreContinuous",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorBoneAnglesAreContinuous::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnFish(World, 7u);
+	Fish->PlaneHalfWidth = 60.f; // narrow: wall reversals are routine
+	Fish->PlaneHalfHeight = 150.f;
+	Fish->InitializeSwim();
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Mesh)) return false;
+	Fish->SetMesh(Mesh);
+
+	// Bound on the per-step change of Tail's component-space rotation. Chaining sums the yaw of all
+	// spine bones, so both the wave and the bend terms are summed over the chain gains.
+	constexpr float Dt = 0.05f;
+	aquarium::SwimAnimParams P;
+	P.boneCount = 7; // Spine0..Spine5 + Tail, as in AFishActor::SpineBoneNames
+	const float SumGain = P.boneCount + P.tailGain * P.boneCount * (P.boneCount - 1) / 2.f;
+	const float Amp = aquarium::SwimAnimation::Amplitude(Fish->MaxSpeed, P);
+	const float Freq = aquarium::SwimAnimation::Frequency(Fish->MaxSpeed, P);
+	const float WavePhaseStep = Amp * SumGain * 2.f * PI * Freq * Dt;            // phase advance at max speed
+	const float WaveAmpStep = P.amplitudePerSpeedDeg * Fish->Accel * Dt * SumGain; // amplitude change with speed
+	const float BendStep = P.bendPerTurnRateDeg * Fish->MaxFacingTurnRate * Dt * P.boneCount; // turn rate ramps at <= MaxFacingTurnRate/s
+	const float MaxTailStepDeg = WavePhaseStep + WaveAmpStep + BendStep + 1.f;
+
+	Fish->StepSwim(Dt); // warm-up: first step snaps to the initial heading
+	FQuat Prev = Fish->BoneTransform(FName(TEXT("Tail"))).GetRotation();
+	for (int i = 1; i < 300; ++i)
+	{
+		Fish->StepSwim(Dt);
+		const FQuat Now = Fish->BoneTransform(FName(TEXT("Tail"))).GetRotation();
+		const float StepDeg = FMath::RadiansToDegrees(Prev.AngularDistance(Now));
+		if (!TestTrue(FString::Printf(TEXT("step %d: tail rotation jumped %.1f deg (bound %.1f)"), i, StepDeg, MaxTailStepDeg), StepDeg < MaxTailStepDeg))
+		{
+			return false;
+		}
+		Prev = Now;
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -32,8 +32,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Swim") float Accel = 30.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") float Decel = 40.f;
 	// Max rate the visible facing slews toward the velocity direction (deg/s). Bounds the per-frame
-	// rotation even when the 2D velocity reverses through zero at a wall.
-	UPROPERTY(EditAnywhere, Category = "Swim") float MaxFacingTurnRate = 540.f;
+	// rotation even when the 2D velocity reverses through zero at a wall. Also the max ramp rate
+	// (deg/s^2) of the turn rate fed to the body bend. Note: FMath::QInterpConstantTo caps a single
+	// step at 1 rad regardless of DeltaSeconds, so on hitch frames the effective cap is ~57 deg.
+	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "1")) float MaxFacingTurnRate = 540.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") TObjectPtr<USkeletalMesh> FishMesh = nullptr;
 
 	// Resets 2D state from the properties above and places the actor at the plane origin.
@@ -65,6 +67,7 @@ private:
 	float SwimPhase = 0.f;   // accumulated wave phase (rad), advanced per tick
 	float LastHeadingDeg = 0.f;
 	bool bHasHeading = false; // false until the first step with non-zero speed; turn rate is 0 until then
+	float BendTurnRate = 0.f; // signed deg/s fed to the body bend; ramp-limited, follows the slewed facing
 
 	// Chains Spine0..Tail component-space transforms from the reference pose with the wave angles.
 	void ApplyBodyWave(const std::vector<float>& AnglesDeg);

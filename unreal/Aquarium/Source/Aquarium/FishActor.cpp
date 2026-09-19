@@ -32,6 +32,7 @@ void AFishActor::InitializeSwim()
 	SwimPhase = 0.f;
 	LastHeadingDeg = 0.f;
 	bHasHeading = false;
+	BendTurnRate = 0.f;
 	if (FishMesh)
 	{
 		SetMesh(FishMesh);
@@ -55,16 +56,16 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	const aquarium::Vec3 W = Plane.ToWorld(Motion.position);
 	SetActorLocation(FVector(W.x, W.y, W.z));
 
-	// Face the 2D velocity; turn rate comes from the 2D heading so it does not spike on yaw flips.
-	float TurnRate = 0.f;
+	// Face the 2D velocity. The bend turn rate follows the facing we actually apply (slewed, so it is
+	// bounded by MaxFacingTurnRate) rather than the raw 2D heading, which jumps ~180 deg in one step
+	// when the velocity reverses at a wall and would curl the whole tail for a single frame.
+	float TargetTurnRate = 0.f;
 	if (CurrentSpeed() > 1e-3f)
 	{
 		const bool bFirstHeading = !bHasHeading;
 		const float HeadingDeg = aquarium::HeadingDeg(Motion.velocity);
-		if (!bFirstHeading)
-		{
-			TurnRate = aquarium::TurnRateDegPerSec(LastHeadingDeg, HeadingDeg, DeltaSeconds);
-		}
+		// Raw 2D heading delta only provides the left/right sign of the bend.
+		const float RawTurnRate = bFirstHeading ? 0.f : aquarium::TurnRateDegPerSec(LastHeadingDeg, HeadingDeg, DeltaSeconds);
 		LastHeadingDeg = HeadingDeg;
 		bHasHeading = true;
 
@@ -82,7 +83,17 @@ void AFishActor::StepSwim(float DeltaSeconds)
 			? Target
 			: FMath::QInterpConstantTo(Current, Target, DeltaSeconds, FMath::DegreesToRadians(MaxFacingTurnRate));
 		SetActorRotation(Next);
+
+		if (!bFirstHeading)
+		{
+			const float AppliedTurnRate = FMath::RadiansToDegrees(Current.AngularDistance(Next)) / DeltaSeconds;
+			TargetTurnRate = FMath::Sign(RawTurnRate) * FMath::Min(AppliedTurnRate, MaxFacingTurnRate);
+		}
 	}
+	// Ramp the bend input at <= MaxFacingTurnRate per second so the bend itself cannot pop when the
+	// slew starts at full rate (bendPerTurnRateDeg * MaxFacingTurnRate can exceed maxBendDeg).
+	BendTurnRate = FMath::FInterpConstantTo(BendTurnRate, TargetTurnRate, DeltaSeconds, MaxFacingTurnRate);
+	const float TurnRate = BendTurnRate;
 
 	SwimPhase = aquarium::SwimAnimation::AdvancePhase(SwimPhase, CurrentSpeed(), DeltaSeconds, AnimParams);
 	ApplyBodyWave(aquarium::SwimAnimation::BoneAngles(CurrentSpeed(), TurnRate, SwimPhase, AnimParams));
