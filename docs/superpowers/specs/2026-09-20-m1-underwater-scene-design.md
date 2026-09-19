@@ -33,7 +33,7 @@ Unreal 5.8 프로젝트(`unreal/Aquarium`)에서 고정 잠수부 시점의 수�
 - `Source/Aquarium/`:
   - `Aquarium.Build.cs`가 저장소 루트의 `rules/include`를 include 경로에, `rules/src/*.cpp`를 소스에 포함한다(복제 금지).
   - `AFishActor`: 스켈레탈 메시 컴포넌트를 갖고, 매 틱 규칙 계층을 호출해 위치·회전을 갱신한다. 유영 평면(2D `Vec2`)을 월드 좌표로 바꾸는 변환은 이 액터의 책임이다.
-  - 애니메이션: `AFishActor`가 매 틱 `aquarium::SwimAnimation::BoneAngles(speed, turnRate, time)`를 호출해 얻은 각도를 `UPoseableMeshComponent::SetBoneRotationByName`으로 척추·꼬리 본에 적용한다.
+  - 애니메이션: `AFishActor`가 매 틱 `aquarium::SwimAnimation::BoneAngles(speed, turnRate, phase)` (위상은 `AdvancePhase`로 매 틱 누적)를 호출해 얻은 각도를 `UPoseableMeshComponent::SetBoneRotationByName`으로 척추·꼬리 본에 적용한다.
 
 ### 좌표 변환
 규칙 계층은 x+ = 화면 오른쪽, y+ = 화면 위인 2D 평면을 쓴다. `AFishActor`는 유영 평면의 원점·가로축·세로축(월드 벡터)을 프로퍼티로 갖고, `Vec2 → FVector = Origin + x·Right + y·Up`으로 변환한다. 물고기의 진행 방향은 속도 벡터를 같은 방식으로 변환해 `LookAt` 회전으로 만든다. 깊이 방향은 M1에서 고정한다.
@@ -47,7 +47,7 @@ Tick(dt)
  → StepMotion(motion, dir, params, dt)
  → motion.position = ClampToArea(motion.position, area)
  → SetActorLocation(ToWorld(motion.position)), SetActorRotation(LookAt(ToWorld(velocity)))
- → angles = SwimAnimation::BoneAngles(|velocity|, Δyaw/dt, t) → PoseableMesh.SetBoneRotationByName(...)
+ → angles = SwimAnimation::BoneAngles(|velocity|, Δyaw/dt, phase) → PoseableMesh.SetBoneRotationByName(...)
 ```
 
 ## 장면
