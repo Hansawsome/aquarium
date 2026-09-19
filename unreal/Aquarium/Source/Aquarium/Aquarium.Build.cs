@@ -16,7 +16,8 @@ public class Aquarium : ModuleRules
 		ConditionalAddModuleDirectory(new DirectoryReference(Path.Combine(RulesDir, "src")));
 		bEnableExceptions = false;
 
-		// Automation tests use FAutomationEditorCommonUtils (editor only).
+		// FishActor automation tests (Tests/FishActorTests.cpp) spawn actors into a test map via
+		// FAutomationEditorCommonUtils::CreateNewMap, which lives in UnrealEd (editor builds only).
 		if (Target.bBuildEditor)
 		{
 			PrivateDependencyModuleNames.Add("UnrealEd");

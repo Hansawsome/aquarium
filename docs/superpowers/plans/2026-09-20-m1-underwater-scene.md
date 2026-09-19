@@ -585,7 +585,6 @@ public class Aquarium : ModuleRules
 	public Aquarium(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-		CppStandard = CppStandardVersion.Cpp17;
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
 
 		// Engine-independent rules layer lives at the repo root; compile the same sources here (no copies).
@@ -604,7 +603,7 @@ public class Aquarium : ModuleRules
 }
 ```
 
-`ConditionalAddModuleDirectory`는 UBT가 해당 디렉터리의 `.cpp`를 이 모듈 소스로 포함하게 한다.
+`ConditionalAddModuleDirectory`는 UBT가 해당 디렉터리의 `.cpp`를 이 모듈 소스로 포함하게 한다. UE 5.8은 C++20을 강제하므로(`CppStandardVersion.Cpp17`는 폐기됨) 규칙 코드는 독립 빌드에서는 C++17, Unreal 안에서는 C++20으로 이중 컴파일된다 — 두 표준에서 의미가 달라지는 구문(designated initializer, `<=>`, concepts 등)은 `rules/`에서 쓰지 않는다.
 
 - [ ] **Step 4: 통과 확인** — UE 빌드 → `Result: Succeeded`. 이어서 UE 테스트. Expected 출력에 `Aquarium.Rules.LinksIntoModule ... Success`. 실패 시 로그 전체를 `grep -B5 -A5 LinksIntoModule`로 확인.
 

@@ -8,6 +8,8 @@ add_library(aquarium_rules
   rules/src/Nickname.cpp
 )
 target_include_directories(aquarium_rules PUBLIC rules/include)
+# Match the stricter Unreal build early: same sources are compiled inside UE with warnings.
+target_compile_options(aquarium_rules PUBLIC -Wall -Wextra -Wshadow)
 
 include(FetchContent)
 FetchContent_Declare(
