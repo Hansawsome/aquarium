@@ -1,9 +1,9 @@
 #include "AquariumGameMode.h"
 #include "DiverPlayerController.h"
-#include "GameFramework/SpectatorPawn.h"
+#include "DiverSpectatorPawn.h"
 
 AAquariumGameMode::AAquariumGameMode()
 {
 	PlayerControllerClass = ADiverPlayerController::StaticClass();
-	DefaultPawnClass = ASpectatorPawn::StaticClass();   // no visible pawn; view comes from DiverCamera
+	DefaultPawnClass = ADiverSpectatorPawn::StaticClass();   // no visible pawn; view comes from DiverCamera
 }

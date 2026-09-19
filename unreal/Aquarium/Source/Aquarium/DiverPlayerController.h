@@ -8,6 +8,8 @@ UCLASS()
 class AQUARIUM_API ADiverPlayerController : public APlayerController
 {
 	GENERATED_BODY()
+public:
+	ADiverPlayerController();
 protected:
 	virtual void BeginPlay() override;
 };
