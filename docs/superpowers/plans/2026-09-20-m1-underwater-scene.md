@@ -254,13 +254,15 @@ TEST_CASE("tail bones lag in phase and swing wider") {
 }
 
 TEST_CASE("turning adds a clamped lateral bend to every bone") {
-    auto a = SwimAnimation::BoneAngles(0.f, 50.f, 0.f, P());    // sin(0)=0, bend = 10
-    REQUIRE(a[0] == Approx(10.f));
-    REQUIRE(a[3] == Approx(10.f));
-    auto b = SwimAnimation::BoneAngles(0.f, 500.f, 0.f, P());   // clamped to 20
-    REQUIRE(b[0] == Approx(20.f));
-    auto c = SwimAnimation::BoneAngles(0.f, -500.f, 0.f, P());
-    REQUIRE(c[0] == Approx(-20.f));
+    const auto p = P();
+    const auto base = SwimAnimation::BoneAngles(0.f, 0.f, 0.f, p);
+    const auto turned = SwimAnimation::BoneAngles(0.f, 50.f, 0.f, p);      // bend = 0.2*50 = 10
+    REQUIRE(turned[0] - base[0] == Approx(10.f));
+    REQUIRE(turned[3] - base[3] == Approx(10.f));
+    const auto clamped = SwimAnimation::BoneAngles(0.f, 500.f, 0.f, p);    // clamped to 20
+    REQUIRE(clamped[0] - base[0] == Approx(20.f));
+    const auto negative = SwimAnimation::BoneAngles(0.f, -500.f, 0.f, p);
+    REQUIRE(negative[0] - base[0] == Approx(-20.f));
 }
 ```
 
