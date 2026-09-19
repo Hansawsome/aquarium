@@ -2,6 +2,12 @@
 
 현재 도입한 외부 에셋은 없다. 무료라는 이유만으로 원본 재배포를 허용한다고 가정하지 않는다.
 
+## 직접 제작
+
+| 에셋 | 제작 도구 | 생성 스크립트 | 산출물 | 외부 텍스처 |
+|---|---|---|---|---|
+| 블루탱 (BlueTang) | Blender 5.2.2 LTS | `assets/blender/make_bluetang.py` | `assets/blender/BlueTang.blend`, `assets/blender/export/BlueTang.fbx`, `T_BlueTang_BaseColor.png` (2048², 절차적 노드 베이크) | 없음 |
+
 ## 도입 시 필수 기록
 
 각 에셋마다 이름, 저작자, 원본 URL, 다운로드 날짜, 라이선스 URL/사본, 출처 표기 문구, 수정 여부, 게임 배포 가능 여부, 공개 저장소에 원본 재배포 가능 여부, 로컬 경로를 기록한다.

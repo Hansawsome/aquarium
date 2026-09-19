@@ -5,3 +5,4 @@ unreal/**/DerivedDataCache/
 unreal/**/Saved/
 unreal/**/.vs/
 unreal/**/*.xcworkspace/
+*.blend1
