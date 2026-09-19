@@ -85,6 +85,7 @@ TEST_CASE("changing speed does not jump the phase") {
 TEST_CASE("negative speed treated as zero") {
     const auto p = P();
     REQUIRE(SwimAnimation::Amplitude(-50.f, p) == SwimAnimation::Amplitude(0.f, p));
+    REQUIRE(SwimAnimation::Frequency(-50.f, p) == SwimAnimation::Frequency(0.f, p));
 }
 
 TEST_CASE("boneCount 0 and negative yield empty vector") {

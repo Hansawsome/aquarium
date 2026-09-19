@@ -9,13 +9,13 @@ struct SwimAnimParams {
     int boneCount = 6;
     float idleAmplitudeDeg = 2.f;
     float amplitudePerSpeedDeg = 0.1f;
+    // Clamp applies to the head bone; bone i swings max x (1 + i*tailGain).
     float maxAmplitudeDeg = 15.f;
     float idleFrequencyHz = 0.5f;
     float frequencyPerSpeedHz = 0.01f;
     float phaseStepRad = 0.8f;
     float tailGain = 0.5f;
     float bendPerTurnRateDeg = 0.2f;
-    // Clamp applies to the head bone; bone i swings max x (1 + i*tailGain).
     float maxBendDeg = 20.f;
 };
 
