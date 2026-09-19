@@ -11,13 +11,22 @@
 | GitHub CLI | 설치됨, 네트워크 허용 환경에서 인증 및 저장소 조회 성공 |
 | C++ 컴파일러 | Apple clang 21.0.0, arm64 |
 | 선택된 개발자 경로 | `/Library/Developer/CommandLineTools` |
-| 정식 Xcode | `/Applications`에서 확인되지 않음. CLI 도구만 선택된 상태 |
-| Unreal / Epic Launcher | `/Applications`, `~/Applications`, `/Users/Shared` 기본 경로에서 확인되지 않음 |
-| Blender | 기본 앱 경로 및 PATH에서 확인되지 않음 |
+| 정식 Xcode | 미설치. Apple 로그인 완료, 26.1.1 Apple silicon 다운로드는 Chrome 차단으로 사용자 진행 필요 |
+| Unreal Engine | 미설치. Epic 로그인 및 엔진 다운로드 필요 |
+| Epic Games Launcher | Homebrew cask 20.1.4 설치, 첫 실행 업데이트 완료, Epic 로그인 대기 |
+| Blender | 5.2.2 LTS, `/Applications/Blender.app`, 실행 확인 |
 | Homebrew | `/opt/homebrew/bin/brew` |
-| CMake | PATH에서 확인되지 않음 |
+| CMake | 4.4.3 설치 완료 |
+| Git LFS | 3.8.0 설치, aquarium 저장소에 `git lfs install --local` 적용 |
 | Superpowers | using-superpowers, brainstorming, writing-plans, test-driven-development, verification-before-completion, systematic-debugging, executing-plans 설치 |
-| 3D MCP | 현재 제공된 도구 목록에서 Blender/Unreal 전용 도구를 확인하지 못함 |
+| Blender MCP | `mcp-for-blender==2.0.0` 설치 및 Codex 등록, MCP 초기화·31개 도구 조회·장면 조회·Python 실행 성공 |
+| Unreal MCP | UE 5.8의 공식 내장 플러그인 사용 예정. 아직 미연결 |
+
+## 2026-09-19 설치 작업
+
+사용자가 Unreal·Blender·정식 Xcode 설치와 MCP 연결을 명시적으로 승인했다. 제품 설계 문서의 후속 검토와 별개로 개발 도구 준비를 진행한다.
+
+설치 및 검증 상세: [SETUP.md](SETUP.md).
 
 ## 후속 준비
 

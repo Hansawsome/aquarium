@@ -13,6 +13,7 @@
 - [설계 — 구성과 기술 결정](docs/superpowers/specs/2026-09-19-aquarium-design.md)
 - [TASK — 진행 상태와 단계별 완료 기준](docs/TASK.md)
 - [개발 환경 확인 결과](docs/ENVIRONMENT.md)
+- [설치 및 MCP 연결 상태](docs/SETUP.md)
 - [에셋 출처 기록](docs/ASSETS.md)
 - [개발 에이전트 지침](AGENTS.md)
 
