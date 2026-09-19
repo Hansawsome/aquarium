@@ -940,7 +940,7 @@ void AFishActor::Tick(float DeltaSeconds)
 
 주의: `Wander`가 `TOptional`인 이유는 `WanderBehavior`에 기본 생성자가 없기 때문이다. `<vector>`·`<optional>` 등 표준 헤더는 규칙 헤더가 이미 포함한다.
 
-- [ ] **Step 4: 통과 확인** — UE 빌드 `Result: Succeeded` → UE 테스트. Expected: `Aquarium.Fish.*` 4개 `Success`. `SpineBonesExistOnMesh`가 본 이름으로 실패하면 FBX 임포트 결과의 본 이름(예: `BlueTangRig:Spine0`)을 확인해 Task 3의 export 옵션(`use_armature_deform_only`, 네임스페이스) 또는 `SpineBoneNames()`를 맞춘다.
+- [ ] **Step 4: 통과 확인** — UE 빌드 `Result: Succeeded` → UE 테스트. Expected: `Aquarium.Fish.*` 4개 `Success`. `SpineBonesExistOnMesh`가 본 이름으로 실패하면 FBX 임포트 결과의 본 이름을 확인한다. 예상되는 차이: (a) 아마추어 오브젝트가 `BlueTangRig`라는 추가 루트 본으로 들어옴 — `Spine*` 이름 조회에는 영향 없음, 그대로 둔다; (b) `BlueTangRig:Spine0`처럼 네임스페이스가 붙음 — Task 3의 export 옵션을 고친다. 물고기가 90° 돌아 보이면 메시를 회전하지 말고 Task 3의 `axis_forward/axis_up`을 Blender 기본값(`-Z`/`Y`)으로 바꿔 재내보내기한다.
 
 - [ ] **Step 5: 커밋**
 
