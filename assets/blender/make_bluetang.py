@@ -171,4 +171,18 @@ bpy.ops.export_scene.fbx(filepath=os.path.join(EXPORT, "BlueTang.fbx"), use_sele
                          apply_unit_scale=True, apply_scale_options='FBX_SCALE_NONE',
                          axis_forward='X', axis_up='Z', add_leaf_bones=False,
                          bake_anim=False, mesh_smooth_type='FACE', path_mode='AUTO', embed_textures=False)
+
+# ---------- preview render (after export so camera/light never enter the FBX) ----------
+cam = bpy.data.objects.new("PreviewCam", bpy.data.cameras.new("PreviewCam"))
+scene.collection.objects.link(cam)
+cam.location = (20, -45, 10); cam.rotation_euler = (1.35, 0, 0.42)
+scene.camera = cam
+sun = bpy.data.objects.new("PreviewSun", bpy.data.lights.new("PreviewSun", 'SUN'))
+scene.collection.objects.link(sun)
+sun.rotation_euler = (0.8, 0.3, 0.5)
+scene.render.engine = 'BLENDER_EEVEE'
+scene.render.resolution_x = 1280; scene.render.resolution_y = 720
+scene.render.filepath = os.path.join(EXPORT, "preview.png")
+bpy.ops.render.render(write_still=True)
+
 print("BLUETANG_OK verts=%d bones=%d" % (len(body.data.vertices), len(arm.data.bones)))
