@@ -10,10 +10,10 @@
 | 기존 파일 | 초기 커밋 `a5c902b`, `.gitkeep` |
 | GitHub CLI | 설치됨, 네트워크 허용 환경에서 인증 및 저장소 조회 성공 |
 | C++ 컴파일러 | Apple clang 21.0.0, arm64 |
-| 선택된 개발자 경로 | `/Library/Developer/CommandLineTools` |
-| 정식 Xcode | 미설치. Apple 로그인 완료, 26.1.1 Apple silicon 다운로드는 Chrome 차단으로 사용자 진행 필요 |
+| 선택된 개발자 경로 | `/Applications/Xcode.app/Contents/Developer` (2026-09-20 확인) |
+| 정식 Xcode | **27.0 (27A266a)** 설치, macOS 27.0 SDK. Metal Toolchain 27A266a는 2026-09-20 `xcodebuild -downloadComponent MetalToolchain`으로 추가 설치, `xcrun metal --version` 동작 확인. **주의: Epic 문서상 UE 5.8 권장은 26.1.1, 최소 26.0이며 27.x는 언급 없음(26.4는 명시적 비호환)** |
 | Unreal Engine | 미설치. Epic 로그인 및 엔진 다운로드 필요 |
-| Epic Games Launcher | Homebrew cask 20.1.4 설치, 첫 실행 업데이트 완료, Epic 로그인 대기 |
+| Epic Games Launcher | Homebrew cask 20.1.4 설치, 첫 실행 업데이트 완료, 사용자 보고로 Epic 로그인 완료(2026-09-20). `LauncherInstalled.dat`의 설치 목록은 비어 있음 |
 | Blender | 5.2.2 LTS, `/Applications/Blender.app`, 실행 확인 |
 | Homebrew | `/opt/homebrew/bin/brew` |
 | CMake | 4.4.3 설치 완료 |

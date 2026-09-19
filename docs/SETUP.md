@@ -1,6 +1,6 @@
 # macOS 개발 도구와 MCP 연결
 
-상태 기준: 2026-09-19. 게임 코드와 제품 테스트는 아직 없다.
+상태 기준: 2026-09-20. 게임 코드와 제품 테스트는 아직 없다.
 
 ## 완료
 
@@ -42,15 +42,21 @@ Python MCP SDK로 등록된 실행 파일을 시작하고 stdio 클라이언트�
 
 ### Xcode
 
-Epic의 UE 5.8 Mac 문서에 따라 Xcode 26.1.1을 우선 선택했다. 현재 선택된 개발자 경로는 CommandLineTools이며 정식 Xcode는 아직 없다.
+2026-09-20 사용자가 정식 Xcode를 직접 설치했다. 확인 결과:
 
-Apple 공식 다운로드 페이지 로그인은 사용자가 완료했다. `Xcode 26.1.1 Apple silicon.xip` 링크가 Chrome에서 `ERR_BLOCKED_BY_CLIENT`로 차단돼 자동 다운로드를 완료하지 못했다. 사용자에게 직접 다운로드를 요청했다. 브라우저 보안 정책으로 다운로드 관리 페이지도 열 수 없었으며 우회하지 않았다.
+| 확인 | 결과 |
+|---|---|
+| `xcodebuild -version` | Xcode 27.0, Build 27A266a |
+| `xcode-select -p` | `/Applications/Xcode.app/Contents/Developer` |
+| `xcodebuild -checkFirstLaunchStatus` | 종료 코드 0 (초기 구성 완료) |
+| `xcodebuild -showsdks` | macOS 27.0 SDK |
+| Metal Toolchain | 초기에 누락. `xcodebuild -downloadComponent MetalToolchain`으로 838.9MB 다운로드·설치 후 `xcrun metal --version` = 32023.921 정상 |
 
-파일을 받은 뒤 Apple 서명 압축파일을 정상 해제하고 `/Applications/Xcode.app`에 배치한다. 초기 구성·라이선스·추가 컴포넌트가 끝나면 `xcodebuild -version`, SDK 및 Metal 도구를 확인한다. 관리자 인증이 필요하면 사용자가 직접 수행한다.
+**버전 불일치 위험.** 당초 계획은 Epic의 UE 5.8 Mac 문서에 따른 Xcode 26.1.1이었다. 2026-09-20 재확인한 Epic 문서는 UE 5.8에 대해 최소 26.0, 권장 26.1.1을 명시하고 Xcode 26.4는 비호환이라고 적으며 27.x는 언급하지 않는다. Unreal Build Tool은 지원 범위 밖 Xcode를 거부할 수 있으므로, 엔진 설치 후 빈 프로젝트 C++ 컴파일이 실패하면 26.1.1을 `/Applications/Xcode-26.1.1.app`로 병행 설치하고 `xcode-select`로 전환한다. 27.0으로 빌드가 성공하면 그 사실을 여기에 기록한다.
 
 ### Unreal Engine와 공식 MCP
 
-Epic Launcher 설치와 첫 업데이트를 마쳤고 로그인 화면을 확인했다. 로그인 완료 후 Unreal 5.8 안정 릴리스 선택, macOS 개발에 필요한 구성요소 설치를 진행한다. Launcher 설치만으로 엔진 설치 완료로 기록하지 않는다.
+Epic Launcher 설치와 첫 업데이트를 마쳤고, 2026-09-20 사용자가 Epic 로그인을 완료했다고 보고했다. 같은 날 `LauncherInstalled.dat`의 `InstallationList`는 비어 있어 엔진은 아직 미설치다. 다음은 Launcher에서 Unreal 5.8 안정 릴리스 선택과 macOS 개발 구성요소 설치다. Launcher 설치만으로 엔진 설치 완료로 기록하지 않는다.
 
 엔진 설치 후 수행할 연결:
 

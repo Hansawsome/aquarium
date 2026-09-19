@@ -26,7 +26,7 @@
 | M5 | macOS 시제품 품질과 배포 | SRS 성능 측정, 패키지 실행, 에셋 출처 확인 |
 | M6 | 태블릿 확장 | 대상 기기 결정, 실제 터치 입력·기기 성능·패키징 검증 |
 
-M0 진행: Blender/CMake/Git LFS 설치와 Blender MCP 연결 검증 완료. Epic Launcher 초기 업데이트 완료, 로그인 대기, Xcode 파일 다운로드에 사용자 도움 필요. Unreal 엔진·공식 MCP·패키징 검증은 아직 남아 있다. 상세는 [SETUP.md](SETUP.md).
+M0 진행: Blender/CMake/Git LFS 설치와 Blender MCP 연결 검증 완료. 2026-09-20 Xcode 27.0 설치·Metal Toolchain 추가·Epic 로그인 완료(Xcode 27과 UE 5.8 호환은 미확인, SETUP.md 참고). Unreal 엔진 설치·공식 MCP·빈 프로젝트 빌드·패키징 검증은 아직 남아 있다. 상세는 [SETUP.md](SETUP.md).
 
 ## 검증 현황
 
