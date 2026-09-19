@@ -1,4 +1,4 @@
-build/
+/build/
 unreal/**/Binaries/
 unreal/**/Intermediate/
 unreal/**/DerivedDataCache/
