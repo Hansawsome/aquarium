@@ -9,6 +9,7 @@
 - Blender 실행, MCP 애드온 활성화와 환경설정 저장.
 - PyPI 배포본 `mcp-for-blender==2.0.0`을 uv tool로 설치, Python 3.11 사용.
 - Codex에 `blender` stdio MCP 등록. 기존 다른 MCP 항목은 보존.
+- 2026-09-20 Claude Code에도 프로젝트 범위(`.mcp.json`)로 같은 서버 등록. 새 세션에서 승인 후 도구 사용 가능.
 - Blender 애드온의 telemetry 동의와 MCP 프로세스의 telemetry를 모두 비활성화.
 
 ## Blender 연결 구성
@@ -18,6 +19,7 @@
 - 애드온: `~/Library/Application Support/Blender/5.2/scripts/addons/blender_mcp.py`
 - 연결: `127.0.0.1:9876`, Blender 실행 시 애드온이 자동 시작.
 - Codex 설정: `~/.codex/config.toml`의 `mcp_servers.blender`.
+- Claude Code 설정: 저장소의 `.mcp.json` (`mcpServers.blender`, 동일 실행 파일·환경 변수).
 - 환경 변수: `DISABLE_TELEMETRY=true`, `BLENDER_HOST=127.0.0.1`, `BLENDER_PORT=9876`.
 - 외부 유료 3D 생성 서비스는 연결하지 않았다.
 
@@ -35,6 +37,8 @@ Python MCP SDK로 등록된 실행 파일을 시작하고 stdio 클라이언트�
 | `get_addon_status` | 프로토콜 7, 최신 상태, Blender 5.2.2 LTS, telemetry false |
 | `get_scene_info` | 기본 장면의 Cube, Light, Camera 반환 |
 | `execute_blender_code` | 버전과 telemetry 설정을 읽는 Python 코드 실행 성공 |
+
+2026-09-20 Claude Code 등록 직후 동일 stdio 클라이언트로 재검증: `initialize` 성공, `tools/list` 31개, `execute_blender_code`로 Blender 5.2.2 LTS·객체 3개 확인. `get_scene_info`는 `user_prompt` 인자가 필수다.
 
 초기 GitHub 소스 체크아웃은 telemetry 구성 모듈이 배포용으로 제외되어 `get_addon_status`에서 오류가 났다. 소스에 임시 코드를 추가하지 않고 동일 버전의 정식 PyPI 배포본으로 교체한 뒤 위 검증을 통과했다. 검사한 원본은 `~/dev/tools/blender-mcp`, 커밋 `6f992ffbca3cb715d111fc640b737b808632273c`에 남아 있으며 현재 MCP 실행 경로는 이 소스가 아니다.
 
