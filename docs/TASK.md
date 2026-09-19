@@ -14,7 +14,7 @@
 - [x] 사용자 문서 검토 — 2026-09-19 엔진(Unreal 5 유지) 확정과 함께 승인
 - [x] 상세 TDD 구현 계획 작성과 실행 방식 선택 — `docs/superpowers/plans/2026-09-19-rules-layer.md`, executing-plans로 2026-09-20 실행
 
-## 구현 로드맵 — M0 거의 완료, M1 진행 가능
+## 구현 로드맵 — M0 완료, M1 진행 중
 
 | 단계 | 작업 | 완료 조건 |
 |---|---|---|
@@ -25,7 +25,7 @@
 | M4 | 클릭 도망·회복·애니메이션 | F-09~13 테스트, 중복 입력·중심 적중·모서리 검증 |
 | M5 | macOS 시제품 품질과 배포 | SRS 성능 측정, 패키지 실행, 에셋 출처 확인 |
 
-M0 진행(2026-09-20): Blender/CMake/Git LFS·Blender MCP 완료. Xcode 27.0 + UE 5.8.2 설치, 엔진 설정으로 호환 확인. `unreal/Aquarium/` C++ 프로젝트의 에디터 타깃 컴파일·헤드리스 에디터 실행·게임 타깃 컴파일 성공. 남은 것: UBT 앱 마무리 단계 실패(직접 xcodebuild는 성공, SETUP.md 미해결 항목), 에디터 GUI 실행 확인, Unreal MCP 연결, 패키징은 M5로 이월. 상세는 [SETUP.md](SETUP.md).
+M0 진행(2026-09-20): Blender/CMake/Git LFS·Blender MCP 완료. Xcode 27.0 + UE 5.8.2 설치, 엔진 설정으로 호환 확인. `unreal/Aquarium/` C++ 프로젝트의 에디터 타깃 컴파일·헤드리스 에디터 실행·게임 타깃 컴파일 성공. 에디터 GUI 실행과 Unreal MCP 연결(67개 툴셋, 장면 조회, 뷰포트 캡처) 검증 완료. 남은 것: UBT 앱 마무리 단계 실패(직접 xcodebuild는 성공, SETUP.md 미해결 항목)와 패키징은 M5로 이월. **M0 종료.** 상세는 [SETUP.md](SETUP.md).
 
 ## 검증 현황
 

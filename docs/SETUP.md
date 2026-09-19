@@ -73,20 +73,30 @@ UE 5.8.2를 Launcher로 설치했다. C++ 프로젝트 골격을 `unreal/Aquariu
 
 **미해결:** UBT 내부에서만 앱 마무리가 실패한다. 샌드박스 비활성화, `Build/Mac/Resources` 디렉터리 생성, 존재하지 않는 `TMPDIR` 재현 시도로는 원인을 못 찾았다. Xcode 27 + UE 5.8.2 조합 이슈로 추정한다. 컴파일 검증 목적은 달성했으므로 이월하고, M5 패키징(`RunUAT BuildCookRun`) 단계에서 재확인한다. 에디터 GUI 실행은 아직 하지 않았다(헤드리스 commandlet만).
 
-### Unreal 공식 MCP
+### Unreal 공식 MCP — 연결 검증 완료 (2026-09-20)
 
-Epic Launcher 설치와 첫 업데이트를 마쳤고, 2026-09-20 사용자가 Epic 로그인을 완료했다고 보고했다. 같은 날 `LauncherInstalled.dat`의 `InstallationList`는 비어 있어 엔진은 아직 미설치다. 다음은 Launcher에서 Unreal 5.8 안정 릴리스 선택과 macOS 개발 구성요소 설치다. Launcher 설치만으로 엔진 설치 완료로 기록하지 않는다.
+`Aquarium.uproject`에 `ModelContextProtocol`과 `AllToolsets` 플러그인을 활성화했다. 에디터 GUI를 다음 명령으로 실행하면 서버가 자동 시작된다:
 
-엔진 설치 후 수행할 연결:
+```bash
+"/Users/Shared/Epic Games/UE_5.8/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" \
+  "$PWD/unreal/Aquarium/Aquarium.uproject" \
+  -ExecCmds="ModelContextProtocol.EnableAnalytics 0, ModelContextProtocol.StartServer" -log
+```
 
-1. 설치된 엔진에서 `Unreal MCP` (`ModelContextProtocol`)와 `All Toolsets` 플러그인 지원을 확인한다.
-2. 개발 프로젝트에서 플러그인을 활성화하고 에디터를 재시작한다.
-3. 로컬 포트 충돌을 확인한 뒤 `ModelContextProtocol.StartServer`로 시작한다. 기본 주소는 `http://127.0.0.1:8000/mcp`다.
-4. MCP 분석 전송은 `ModelContextProtocol.EnableAnalytics 0`으로 끈다.
-5. 실행된 주소를 Codex에 등록하고 initialize → tools/list → 읽기 전용 장면 조회를 실제로 검증한다. 엔진 호출은 순차 수행한다.
-6. 게임 배포물에서는 개발용 MCP 서버가 시작되지 않도록 구성·검증한다.
+| 확인 | 결과 |
+|---|---|
+| 에디터 GUI 실행 | 창 `Aquarium - 언리얼 에디터` 확인(System Events). 실행 후 약 35~65초에 `127.0.0.1:8000` LISTEN |
+| MCP `initialize` (Streamable HTTP, `POST /mcp`) | 200, `Mcp-Session-Id` 발급, protocolVersion 2025-06-18 |
+| `tools/list` | 메타 도구 3개: `list_toolsets`, `describe_toolset`, `call_tool` |
+| `list_toolsets` | **67개 툴셋** (EditorAppToolset, LogsToolset, Niagara, PCG, UMG, Sequencer 등) |
+| 읽기 전용 조회 | `call_tool(toolset_name="EditorToolset.EditorAppToolset", tool_name="GetVisibleActors")` → 현재 레벨 액터 목록 반환 |
+| 뷰포트 캡처 | `CaptureViewport(captureTransform=현재 카메라, annotations=[])` → 2027×1090 PNG. **macOS 화면 기록 권한 없이도 실제 렌더링 결과를 확인하는 채널** |
 
-Unreal 공식 MCP는 실험적 기능이다. 엔진과 프로젝트가 준비되지 않아 아직 등록·연결 완료로 표시하지 않는다.
+호출 규약: `call_tool` 인자는 `toolset_name`(툴셋 전체 이름) + `tool_name`(접두사 없는 이름) + `arguments`. 선택 인자도 스키마에 있으면 명시해야 한다(예: `CaptureViewport`의 `captureTransform`, `annotations`는 생략 시 "needs a default value" 오류). 에디터 호출은 순차 수행한다.
+
+Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`). 에디터가 꺼져 있으면 연결 실패가 정상이다. 배포 게임에는 이 플러그인의 서버가 포함되지 않도록 패키징 단계(M5)에서 확인한다.
+
+참고: `DefaultEngine.ini`의 시작 맵 `/Engine/Maps/Templates/OpenWorld`는 에디터가 `Untitled_1`로 열었다. M1에서 프로젝트 자체 맵을 만들면 교체한다.
 
 ## 출처
 

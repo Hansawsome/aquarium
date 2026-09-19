@@ -20,7 +20,7 @@
 | Git LFS | 3.8.0 설치, aquarium 저장소에 `git lfs install --local` 적용 |
 | Superpowers | using-superpowers, brainstorming, writing-plans, test-driven-development, verification-before-completion, systematic-debugging, executing-plans 설치 |
 | Blender MCP | `mcp-for-blender==2.0.0` 설치 및 Codex 등록, MCP 초기화·31개 도구 조회·장면 조회·Python 실행 성공 |
-| Unreal MCP | `Engine/Plugins/Experimental/ModelContextProtocol` 존재 확인. 아직 프로젝트 활성화·연결 안 함 |
+| Unreal MCP | 프로젝트에 활성화, `http://127.0.0.1:8000/mcp` 연결·67개 툴셋·장면 조회·뷰포트 캡처 검증 완료 (2026-09-20) |
 
 ## 2026-09-19 설치 작업
 
