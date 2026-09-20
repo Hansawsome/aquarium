@@ -154,4 +154,58 @@ bool FSessionEndClearsAndReentryIsFresh::RunTest(const FString&)
 	return true;
 }
 
+// The player's fish must read as the biggest fish on screen regardless of which species the
+// session assigns, so the game mode normalizes it to PlayerFishTargetLengthCm.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionPlayerFishIsNormalizedSize, "Aquarium.Session.PlayerFishIsNormalizedSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSessionPlayerFishIsNormalizedSize::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+
+	// One-species catalogs so the assignment is forced.
+	auto SpawnSingle = [World](const TCHAR* MeshPath) -> AAquariumGameMode*
+	{
+		FActorSpawnParameters P;
+		P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AAquariumGameMode* GM = World->SpawnActor<AAquariumGameMode>(AAquariumGameMode::StaticClass(), FTransform::Identity, P);
+		TArray<FFishSpecies> Catalog;
+		FFishSpecies S;
+		S.DisplayName = FText::FromString(TEXT("종"));
+		S.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(MeshPath));
+		Catalog.Add(S);
+		GM->SetCatalogForTest(Catalog, 7);
+		return GM;
+	};
+
+	AAquariumGameMode* Small = SpawnSingle(TEXT("/Game/Fish/Damselfish/SK_Damselfish.SK_Damselfish"));
+	TestEqual(TEXT("small ok"), Small->BeginSession(TEXT("니모")), EBeginSessionResult::Ok);
+	AFishActor* SmallFish = Small->PlayerFish();
+	TestNotNull(TEXT("small fish"), SmallFish);
+
+	AAquariumGameMode* Large = SpawnSingle(TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	TestEqual(TEXT("large ok"), Large->BeginSession(TEXT("도리")), EBeginSessionResult::Ok);
+	AFishActor* LargeFish = Large->PlayerFish();
+	TestNotNull(TEXT("large fish"), LargeFish);
+
+	if (SmallFish == nullptr || LargeFish == nullptr)
+	{
+		return false;
+	}
+
+	const float Target = Small->PlayerFishTargetLengthCm;
+	const float SmallLength = SmallFish->GetComponentsBoundingBox(true).GetExtent().X * 2.f;
+	const float LargeLength = LargeFish->GetComponentsBoundingBox(true).GetExtent().X * 2.f;
+	TestTrue(FString::Printf(TEXT("small species normalized to %.1f cm (got %.1f)"), Target, SmallLength),
+		FMath::Abs(SmallLength - Target) <= Target * 0.15f);
+	TestTrue(FString::Printf(TEXT("large species normalized to %.1f cm (got %.1f)"), Target, LargeLength),
+		FMath::Abs(LargeLength - Target) <= Target * 0.15f);
+
+	// The small species has to be scaled up far more than the large one.
+	const float SmallScale = SmallFish->GetActorScale3D().X;
+	const float LargeScale = LargeFish->GetActorScale3D().X;
+	TestTrue(FString::Printf(TEXT("scales differ by >1.5x (small %.2f, large %.2f)"), SmallScale, LargeScale),
+		SmallScale > LargeScale * 1.5f);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

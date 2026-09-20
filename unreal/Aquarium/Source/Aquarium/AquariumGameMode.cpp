@@ -130,6 +130,21 @@ AFishActor* AAquariumGameMode::SpawnPlayerFish(USkeletalMesh* Mesh)
 	Fish->PlaneHalfHeight = PlaneHalfHeight;
 	Fish->FishMesh = Mesh;
 	Fish->InitializeSwim();
+
+	// Normalize the body length so every species reads the same size (see PlayerFishTargetLengthCm).
+	// GetBounds() is the skeletal mesh asset's own bounds in cm; X is the nose-to-tail axis.
+	const float NativeLength = Mesh != nullptr ? Mesh->GetBounds().BoxExtent.X * 2.f : 0.f;
+	if (FMath::IsFinite(NativeLength) && NativeLength > KINDA_SMALL_NUMBER)
+	{
+		const float Scale = FMath::Clamp(PlayerFishTargetLengthCm / NativeLength, 0.5f, 5.f);
+		Fish->SetActorScale3D(FVector(Scale));
+	}
+	else
+	{
+		// Never log the nickname; the mesh path is enough to find the bad asset.
+		UE_LOG(LogTemp, Warning, TEXT("AquariumGameMode: mesh '%s' has no usable bounds; player fish left at scale 1"),
+			Mesh != nullptr ? *Mesh->GetPathName() : TEXT("<null>"));
+	}
 	return Fish;
 }
 

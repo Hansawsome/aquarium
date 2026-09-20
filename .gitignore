@@ -8,3 +8,4 @@ unreal/**/*.xcworkspace/
 *.blend1
 .DS_Store
 __pycache__/
+docs/reviews/*-frametimes.csv

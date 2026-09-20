@@ -32,6 +32,12 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Session") FVector PlaneOrigin = FVector(220.f, 0.f, 105.f);
 	UPROPERTY(EditAnywhere, Category = "Session") float PlaneHalfWidth = 130.f;
 	UPROPERTY(EditAnywhere, Category = "Session") float PlaneHalfHeight = 65.f;
+	// The player's fish is normalized to this body length (cm) whatever species the session
+	// assigns: the catalog spans 9 cm (Damselfish) to 32 cm (BlueTang), so at native scale a
+	// small assignment reads SMALLER than the background fish. Combined with the nearer plane
+	// at X=220 (background fish sit at X >= 330) this makes it the biggest fish on screen.
+	// Background fish keep their own 0.75-1.3 scatter scale from Scripts/build_reef_m1.py.
+	UPROPERTY(EditAnywhere, Category = "Session") float PlayerFishTargetLengthCm = 34.f;
 
 	EBeginSessionResult BeginSession(const FString& RawNickname);
 	void EndSession();
