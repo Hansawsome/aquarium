@@ -208,7 +208,8 @@ void AAquariumGameMode::FitSwimPlaneToViewport()
 		}
 	}
 
-	const FVector2D Fitted = FitPlaneToView(PlaneOrigin.X, Fov, Aspect, FVector2D(PlaneHalfWidth, PlaneHalfHeight));
+	// Always from the authored request, never from the current extents (see the header).
+	const FVector2D Fitted = FitPlaneToView(PlaneOrigin.X, Fov, Aspect, RequestedPlaneHalfExtents);
 	PlaneHalfWidth = Fitted.X;
 	PlaneHalfHeight = Fitted.Y;
 	// Geometry only; the nickname is never logged.

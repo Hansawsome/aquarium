@@ -30,8 +30,11 @@ public:
 	// larger (perspective); fits the 75° FOV at 2.2 m. Background fish (Scripts/build_reef_m1.py)
 	// stay at X >= 330.
 	UPROPERTY(EditAnywhere, Category = "Session") FVector PlaneOrigin = FVector(220.f, 0.f, 105.f);
-	UPROPERTY(EditAnywhere, Category = "Session") float PlaneHalfWidth = 130.f;
-	UPROPERTY(EditAnywhere, Category = "Session") float PlaneHalfHeight = 65.f;
+	// The authored request. PlaneHalfWidth/PlaneHalfHeight below are the *fitted* values and are
+	// recomputed from this every session, so a fit can never compound on a previous one.
+	UPROPERTY(EditAnywhere, Category = "Session") FVector2D RequestedPlaneHalfExtents = FVector2D(130.f, 65.f);
+	UPROPERTY(VisibleAnywhere, Category = "Session") float PlaneHalfWidth = 130.f;
+	UPROPERTY(VisibleAnywhere, Category = "Session") float PlaneHalfHeight = 65.f;
 	// The player's fish is normalized to this body length (cm) whatever species the session
 	// assigns: the catalog spans 9 cm (Damselfish) to 32 cm (BlueTang), so at native scale a
 	// small assignment reads SMALLER than the background fish. Combined with the nearer plane
@@ -67,6 +70,12 @@ public:
 	// the result is the component-wise minimum against the request, floored so it stays usable.
 	static FVector2D FitPlaneToView(float DistanceCm, float HorizontalFovDeg, float AspectRatio, FVector2D RequestedHalfExtents);
 
+	// Sets PlaneHalfWidth/PlaneHalfHeight from RequestedPlaneHalfExtents, the live viewport aspect
+	// and the DiverCamera FOV. Idempotent: it always fits the authored request, never the current
+	// (already fitted) extents, so repeated sessions cannot shrink the plane step by step.
+	// Public so the automation tests can drive it without a session.
+	void FitSwimPlaneToViewport();
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -81,7 +90,5 @@ private:
 	UPROPERTY() TArray<TObjectPtr<USkeletalMesh>> LoadedMeshes;
 
 	void RebuildLoadedCatalog();
-	// Narrows PlaneHalfWidth/PlaneHalfHeight to the live viewport aspect and camera FOV.
-	void FitSwimPlaneToViewport();
 	AFishActor* SpawnPlayerFish(USkeletalMesh* Mesh);
 };

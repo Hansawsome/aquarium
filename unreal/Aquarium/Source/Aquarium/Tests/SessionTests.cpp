@@ -237,4 +237,33 @@ bool FSessionPlaneFitsAspect::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionPlaneRefitsFromRequest, "Aquarium.Session.PlaneRefitsFromRequest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSessionPlaneRefitsFromRequest::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AAquariumGameMode* GM = SpawnGameMode(World, 1, 2);
+	GM->RequestedPlaneHalfExtents = FVector2D(130.f, 65.f);
+
+	GM->FitSwimPlaneToViewport();
+	const float First = GM->PlaneHalfWidth;
+	const float FirstHeight = GM->PlaneHalfHeight;
+
+	// A second session must produce the same plane, not a plane fitted to the first fit's output.
+	GM->FitSwimPlaneToViewport();
+	TestEqual(TEXT("second fit matches the first"), GM->PlaneHalfWidth, First);
+	TestEqual(TEXT("second fit height matches"), GM->PlaneHalfHeight, FirstHeight);
+
+	// Even if the extents were narrowed in between (a smaller window), the fit restores them.
+	GM->PlaneHalfWidth = 45.f;
+	GM->PlaneHalfHeight = 25.f;
+	GM->FitSwimPlaneToViewport();
+	TestEqual(TEXT("fit ignores the current extents"), GM->PlaneHalfWidth, First);
+	TestEqual(TEXT("height ignores the current extents"), GM->PlaneHalfHeight, FirstHeight);
+
+	TestTrue(TEXT("never wider than the request"), First <= 130.f);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
