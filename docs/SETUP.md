@@ -106,9 +106,11 @@ Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`).
 # 1. 규칙 계층 테스트 (60개)
 cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
 
-# 2. 물고기 모델·리깅·텍스처 베이크·FBX·프리뷰 (Blender 5.2, 종당 약 1분; 공통 모듈 assets/blender/fishlib.py)
-/Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_bluetang.py
-/Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_clownfish.py
+# 2. 에셋 제작 (Blender 5.2, 각 약 1분; 공통 모듈 assets/blender/fishlib.py)
+for f in bluetang clownfish yellowtang butterflyfish damselfish; do
+  /Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_$f.py
+done
+/Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_corals.py   # 산호 3종
 
 # 3. Unreal 에디터 빌드 (이 머신은 UnrealEditor.modules 갱신이 한 번 늦어 두 번 실행)
 UE="/Users/Shared/Epic Games/UE_5.8"
@@ -116,19 +118,21 @@ UE="/Users/Shared/Epic Games/UE_5.8"
 "$UE/Engine/Build/BatchFiles/Mac/Build.sh" AquariumEditor Mac Development -Project="$PWD/unreal/Aquarium/Aquarium.uproject" -WaitMutex
 
 # 4. FBX 임포트(두 종) → 장면 생성 → 검증 (각각 에디터 부팅 약 1분; 종료 코드 대신 IMPORT_OK/REEF_OK/SCENE_OK 확인)
-for s in import_fish.py build_reef_m1.py verify_scene.py; do
+for s in import_fish.py import_props.py build_reef_m1.py verify_scene.py; do
   "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -run=pythonscript -script="$PWD/unreal/Aquarium/Scripts/$s" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep -E "_OK|Traceback"
 done
 
 # 4b. 한국어 폰트 (FontFace 에셋; 폰트 임포트는 commandlet에서 크래시하므로 ExecCmds 방식)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput -ExecCmds="py $PWD/unreal/Aquarium/Scripts/import_fonts.py, quit" 2>&1 | grep FONT_OK
 
-# 5. Unreal Automation 테스트 (24개)
+# 5. Unreal Automation 테스트 (26개)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -ExecCmds="Automation RunTests Aquarium; Quit" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep "Test Completed"
 
 # 6. 영상: M1 34초 유영(-dumpmovie, UI 없음) / M2 13.5초 입장→세션→나가기 흐름(UI 포함 프레임 캡처, 개발 전용 옵션)
 scripts/render_m1_video.sh
-scripts/render_m2_video.sh   # -AquariumAutoNickname=니모(테스트 데이터만) -AquariumAutoExitAfter=8 -AquariumAssignmentSeed=1 -AquariumCaptureUI=<dir>
+scripts/render_m2_video.sh    # M2 흐름 -AquariumAutoNickname=니모(테스트 데이터만) -AquariumAutoExitAfter=8 -AquariumAssignmentSeed=1 -AquariumCaptureUI=<dir>
+scripts/render_m2b_video.sh   # M2b 산호초 22초 관람
+scripts/measure_m2b_perf.sh   # 프레임 시간 CSV → docs/reviews/<날짜>-m2b-perf.md (-benchmark 미사용)
 ```
 
 주의: GUI 에디터를 강제 종료한 뒤 다음 실행이 "패키지 복구" 프롬프트에 걸리면 `unreal/Aquarium/Saved/Autosaves`를 지운다. MCP `CaptureViewport`로 뷰포트 이미지를 얻는 절차는 위 "Unreal 공식 MCP" 절 참고.
