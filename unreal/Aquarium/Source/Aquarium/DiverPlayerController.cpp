@@ -36,6 +36,7 @@ void ADiverPlayerController::BeginPlay()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("No ACameraActor tagged DiverCamera in %s"), *GetWorld()->GetMapName());
 	}
+	// Fallback for the no-widget path below; ShowEntry/ShowSession turn the cursor on.
 	bShowMouseCursor = false;
 
 	Entry = CreateWidget<UEntryWidget>(this, UEntryWidget::StaticClass());
@@ -51,6 +52,16 @@ void ADiverPlayerController::BeginPlay()
 	Hud->AddToViewport(kHudZOrder);
 	ShowEntry();
 	StartAutoReplayIfRequested();
+}
+
+void ADiverPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(AutoSubmitTimer);
+		World->GetTimerManager().ClearTimer(AutoExitTimer);
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void ADiverPlayerController::SetupInputComponent()
@@ -96,14 +107,16 @@ void ADiverPlayerController::ShowSession()
 
 EEntryError ADiverPlayerController::EntryErrorFor(EBeginSessionResult Result, const FString& Raw)
 {
+	// Exhaustive on purpose so a new EBeginSessionResult value fails to compile here.
 	switch (Result)
 	{
 	case EBeginSessionResult::EmptyCatalog:    return EEntryError::NoFishAvailable;
 	case EBeginSessionResult::InvalidNickname: return UEntryWidget::ClassifyNickname(Raw);
-	case EBeginSessionResult::Ok:
-	case EBeginSessionResult::AlreadyActive:
-	default:                                   return EEntryError::None;
+	// Ok never reaches this in practice (HandleSubmitted shows the session first); None keeps it total.
+	case EBeginSessionResult::Ok:              return EEntryError::None;
+	case EBeginSessionResult::AlreadyActive:   return EEntryError::None;
 	}
+	return EEntryError::None;
 }
 
 void ADiverPlayerController::HandleSubmitted(const FString& Raw)

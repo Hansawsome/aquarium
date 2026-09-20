@@ -13,6 +13,7 @@ bool FControllerMapsResult::RunTest(const FString&)
 	TestEqual(TEXT("already active"), ADiverPlayerController::EntryErrorFor(EBeginSessionResult::AlreadyActive, TEXT("니모")), EEntryError::None);
 	TestEqual(TEXT("empty catalog"), ADiverPlayerController::EntryErrorFor(EBeginSessionResult::EmptyCatalog, TEXT("니모")), EEntryError::NoFishAvailable);
 	TestEqual(TEXT("invalid: blank"), ADiverPlayerController::EntryErrorFor(EBeginSessionResult::InvalidNickname, TEXT("   ")), EEntryError::Empty);
+	TestEqual(TEXT("invalid: newline"), ADiverPlayerController::EntryErrorFor(EBeginSessionResult::InvalidNickname, TEXT("니\n모")), EEntryError::InvalidCharacter);
 	TestEqual(TEXT("invalid: 13 hangul"), ADiverPlayerController::EntryErrorFor(EBeginSessionResult::InvalidNickname, TEXT("가나다라마바사아자차카타파")), EEntryError::TooLong);
 	return true;
 }
