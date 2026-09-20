@@ -14,12 +14,12 @@
 - [x] 사용자 문서 검토 — 2026-09-19 엔진(Unreal 5 유지) 확정과 함께 승인
 - [x] 상세 TDD 구현 계획 작성과 실행 방식 선택 — `docs/superpowers/plans/2026-09-19-rules-layer.md`, executing-plans로 2026-09-20 실행
 
-## 구현 로드맵 — M0 완료, M1 진행 중
+## 구현 로드맵 — M0 완료, M1 구현 완료(사용자 시각 검토 대기)
 
 | 단계 | 작업 | 완료 조건 |
 |---|---|---|
 | M0 | Unreal·Xcode·Blender 호환 버전 준비 | 에디터 실행과 빈 프로젝트 macOS 빌드 확인, 버전 기록 |
-| M1 | 규칙 테스트 환경과 최소 수중 장면 | RED/GREEN 기록, 한 종 물고기 유영 영상, 사용자 시각 검토. **규칙 테스트 환경 완료(2026-09-20, Unreal 장면 제외)** |
+| M1 | 규칙 테스트 환경과 최소 수중 장면 | RED/GREEN 기록, 한 종 물고기 유영 영상, 사용자 시각 검토. **2026-09-20 구현 완료**: 규칙 60개 + Unreal Automation 8개 통과, `docs/reviews/2026-09-20-m1-swim.mp4`(34초, 1080p) 생성. **사용자 시각 검토: 대기** |
 | M2 | 별명 입력·세션·무작위 배정·이름표 | F-01~04 및 F-14 테스트, 한국어 패키지 입력 확인 |
 | M3 | 방향키·감속·경계·자동 유영 | F-05~08 테스트, 여러 화면 비율에서 이탈 없음 |
 | M4 | 클릭 도망·회복·애니메이션 | F-09~13 테스트, 중복 입력·중심 적중·모서리 검증 |
@@ -29,8 +29,11 @@ M0 진행(2026-09-20): Blender/CMake/Git LFS·Blender MCP 완료. Xcode 27.0 + U
 
 ## 검증 현황
 
-- 규칙 계층(C++17, Unreal 독립) 테스트: **42개 통과** — 2026-09-20, 브랜치 `feat/rules-layer`, 커밋 `52b6dfe`. 클린 빌드 `cmake -S . -B build && cmake --build build -j && ctest --test-dir build` 결과 `100% tests passed out of 42`. 각 태스크는 헤더 부재 컴파일 실패 → 스텁 assertion 실패(RED) → 구현 통과(GREEN) 순서로 진행했고 커밋 단위로 기록됨. 다룬 SRS 항목: F-01, F-02, F-03, F-05, F-06, F-07, F-08, F-10, F-11, F-12, F-14의 규칙 부분.
-- Unreal 연동 계층(F-04 이름표, F-09 레이캐스트, F-13 애니메이션, 입력 이벤트·세션 UI): 미구현 — 엔진 설치 후 별도 계획.
+- 규칙 계층(C++17, Unreal 독립) 테스트: **60개 통과** — 2026-09-20, 브랜치 `feat/m1-scene`, 커밋 `e56d1fe` (`-Wall -Wextra -Wshadow` 경고 0). M1에서 SwimPlane, SwimAnimation(누적 위상), Heading 추가. 클린 빌드 `cmake -S . -B build && cmake --build build -j && ctest --test-dir build` 결과 `100% tests passed out of 42`. 각 태스크는 헤더 부재 컴파일 실패 → 스텁 assertion 실패(RED) → 구현 통과(GREEN) 순서로 진행했고 커밋 단위로 기록됨. 다룬 SRS 항목: F-01, F-02, F-03, F-05, F-06, F-07, F-08, F-10, F-11, F-12, F-14의 규칙 부분.
+- Unreal Automation 테스트: **8개 Success** (`Automation RunTests Aquarium`, 헤드리스 `-nullrhi`): 규칙 링크 1, `AFishActor` 6(규칙 계층 구동·dt=0·결정성·본 존재·연쇄 본 변환·방향 연속성·본 각도 연속성), 게임 모드 1. F-13의 "순간 반전 없음"은 `FacingIsContinuous`/`BoneAnglesAreContinuous`로 고정.
+- 시각 검토(M1): `docs/reviews/2026-09-20-m1-still.png`, `docs/reviews/2026-09-20-m1-swim.mp4`. 제작자 자체 확인: 수중 안개·빛줄기·바닥 코스틱·모래·블루탱 유영이 보이고 영상 내 순간이동·반전 없음. **사용자 검토 결과: 대기.** 알려진 품질 한계: 물고기 모델은 1차 실루엣(실사 아님), 빛줄기 약함, 검은 옆줄무늬가 거리 때문에 잘 안 보임.
+- 미구현 Unreal 연동: F-04 이름표, F-09 레이캐스트, 입력 이벤트·세션 UI — M2~M4.
+- 성능 측정·패키징: 미실행 — M5.
 - Unreal 빌드: 에디터·게임 타깃 컴파일 성공, 헤드리스 에디터 실행 성공 (2026-09-20, SETUP.md). 화면·성능: 미실행.
 - 무료 에셋 다운로드: 없음.
 - 현재 완료 범위: 설계 문서 작성, 일부 개발 도구 설치, Blender MCP 실제 연결 검증.

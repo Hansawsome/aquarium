@@ -4,7 +4,7 @@
 
 ## 현재 상태
 
-요구사항과 설계 초안을 작성한 단계입니다. 실행 가능한 게임, Unreal 프로젝트, 다운로드한 3D 에셋은 아직 없습니다. 테스트와 빌드는 아직 실행하지 않았습니다.
+규칙 계층(C++17, 테스트 60개)과 Unreal 5.8 프로젝트(`unreal/Aquarium`, Automation 테스트 8개)가 있고, M1 최소 수중 장면에서 스크립트로 만든 블루탱 한 마리가 자율 유영하는 34초 영상(`docs/reviews/`)까지 만들었습니다. 사용자 시각 검토와 M2 이후 기능(별명·방향키·클릭 도망)은 아직입니다. 물고기 모델은 1차 실루엣이라 실사 기준에는 못 미칩니다.
 
 ## 문서
 
@@ -12,6 +12,7 @@
 - [SRS — 동작 및 검증 기준](docs/SRS.md)
 - [설계 — 구성과 기술 결정](docs/superpowers/specs/2026-09-19-aquarium-design.md)
 - [TASK — 진행 상태와 단계별 완료 기준](docs/TASK.md)
+- [M1 설계](docs/superpowers/specs/2026-09-20-m1-underwater-scene-design.md) · [M1 구현 계획](docs/superpowers/plans/2026-09-20-m1-underwater-scene.md)
 - [개발 환경 확인 결과](docs/ENVIRONMENT.md)
 - [설치 및 MCP 연결 상태](docs/SETUP.md)
 - [에셋 출처 기록](docs/ASSETS.md)

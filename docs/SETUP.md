@@ -98,6 +98,36 @@ Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`).
 
 참고: `DefaultEngine.ini`의 시작 맵 `/Engine/Maps/Templates/OpenWorld`는 에디터가 `Untitled_1`로 열었다. M1에서 프로젝트 자체 맵을 만들면 교체한다.
 
+## M1 재현 명령 (2026-09-20)
+
+모든 에셋은 스크립트 산출물이다. 저장소 루트에서:
+
+```bash
+# 1. 규칙 계층 테스트 (60개)
+cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
+
+# 2. 블루탱 모델·리깅·텍스처 베이크·FBX·프리뷰 (Blender 5.2, 약 1분)
+/Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_bluetang.py
+
+# 3. Unreal 에디터 빌드 (이 머신은 UnrealEditor.modules 갱신이 한 번 늦어 두 번 실행)
+UE="/Users/Shared/Epic Games/UE_5.8"
+"$UE/Engine/Build/BatchFiles/Mac/Build.sh" AquariumEditor Mac Development -Project="$PWD/unreal/Aquarium/Aquarium.uproject" -WaitMutex
+"$UE/Engine/Build/BatchFiles/Mac/Build.sh" AquariumEditor Mac Development -Project="$PWD/unreal/Aquarium/Aquarium.uproject" -WaitMutex
+
+# 4. FBX 임포트 → 장면 생성 → 검증 (각각 에디터 부팅 약 1분; 종료 코드 대신 IMPORT_OK/REEF_OK/SCENE_OK 확인)
+for s in import_bluetang.py build_reef_m1.py verify_scene.py; do
+  "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -run=pythonscript -script="$PWD/unreal/Aquarium/Scripts/$s" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep -E "_OK|Traceback"
+done
+
+# 5. Unreal Automation 테스트 (8개)
+"$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -ExecCmds="Automation RunTests Aquarium; Quit" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep "Test Completed"
+
+# 6. 34초 유영 영상 (엔진 -benchmark -dumpmovie, 약 3.5분)
+scripts/render_m1_video.sh
+```
+
+주의: GUI 에디터를 강제 종료한 뒤 다음 실행이 "패키지 복구" 프롬프트에 걸리면 `unreal/Aquarium/Saved/Autosaves`를 지운다. MCP `CaptureViewport`로 뷰포트 이미지를 얻는 절차는 위 "Unreal 공식 MCP" 절 참고.
+
 ## 출처
 
 - [Blender MCP 원본과 설치법](https://github.com/ahujasid/mcp-for-blender)
