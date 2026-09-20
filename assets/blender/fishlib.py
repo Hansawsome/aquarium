@@ -217,10 +217,12 @@ def save_and_export(body, arm, blend_path, fbx_path):
                              bake_anim=False, mesh_smooth_type='FACE', path_mode='AUTO', embed_textures=False)
 
 
-def render_preview(path, cam_loc, cam_rot, resolution=(1280, 720)):
+def render_preview(path, cam_loc, cam_rot, resolution=(1280, 720), fill_energy=0.0):
     """EEVEE still to `path`. Adds PreviewCam/PreviewSun to the scene collection and switches the
     render engine to EEVEE. The FBX is already protected by use_selection; calling this last keeps
-    the camera, light and EEVEE settings out of the saved .blend."""
+    the camera, light and EEVEE settings out of the saved .blend.
+    fill_energy > 0 adds a second sun aimed from the camera side, which lifts surfaces that face
+    the viewer (pectoral fins) out of the key light's shadow; 0.0 is the original single-sun setup."""
     scene = bpy.context.scene
     cam = bpy.data.objects.new("PreviewCam", bpy.data.cameras.new("PreviewCam"))
     scene.collection.objects.link(cam)
@@ -229,6 +231,12 @@ def render_preview(path, cam_loc, cam_rot, resolution=(1280, 720)):
     sun = bpy.data.objects.new("PreviewSun", bpy.data.lights.new("PreviewSun", 'SUN'))
     scene.collection.objects.link(sun)
     sun.rotation_euler = (0.8, 0.3, 0.5)
+    if fill_energy > 0.0:
+        fill_data = bpy.data.lights.new("PreviewFill", 'SUN')
+        fill_data.energy = fill_energy
+        fill = bpy.data.objects.new("PreviewFill", fill_data)
+        scene.collection.objects.link(fill)
+        fill.rotation_euler = (1.1, -0.2, -2.4)     # from the camera side, low
     scene.render.engine = 'BLENDER_EEVEE'
     scene.render.resolution_x, scene.render.resolution_y = resolution
     scene.render.filepath = path
@@ -775,7 +783,8 @@ def _build_species_profile(spec):
                     os.path.join(export_dir, name + ".fbx"))
     preview = spec.get("preview_name", "preview_%s.png" % name.lower())
     render_preview(os.path.join(export_dir, preview), spec["cam_loc"],
-                   spec.get("cam_rot", (1.35, 0, 0.42)))
+                   spec.get("cam_rot", (1.35, 0, 0.42)),
+                   fill_energy=spec.get("preview_fill", 0.0))
     return dict(verts=len(body.data.vertices), bones=len(arm.data.bones),
                 unweighted=unweighted, root_max_w=root_max_w, pec_stray=pec_stray,
                 maps={k: bpy.path.abspath(v.filepath_raw) for k, v in baked["images"].items()})
@@ -835,3 +844,20 @@ def paint_eye(nt, base, centre, radius, sclera=(0.9, 0.9, 0.88, 1), iris=(0.12, 
     col = mix_over(nt, col, radial_mask(nt, centre, radius * 0.72, softness=0.12), iris)
     col = mix_over(nt, col, radial_mask(nt, centre, radius * 0.34, softness=0.15), pupil)
     return col
+
+
+def scale_pattern_world(nt, cell_size, sharpness=3.0):
+    """scale_pattern driven by world position, so `cell_size` really is centimetres.
+
+    A Voronoi node with an unconnected Vector input samples Generated coordinates -- 0..1 across
+    the object's bounding box -- where a scale of 1/cell_size resolves to two or three cells over
+    the whole fish and the bake reads as a few big polygonal panels. Feeding Position instead makes
+    the density body-size independent: a body h cm tall shows about h/cell_size rows of scales.
+    Returns (height_socket, roughness_socket) exactly like scale_pattern."""
+    before = {n for n in nt.nodes if n.type == 'TEX_VORONOI'}
+    height, rough = scale_pattern(nt, cell_size, sharpness)
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    for n in nt.nodes:
+        if n.type == 'TEX_VORONOI' and n not in before:
+            nt.links.new(geo.outputs["Position"], n.inputs["Vector"])
+    return height, rough

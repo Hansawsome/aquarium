@@ -8,7 +8,7 @@
 #
 # Conventions: +X = head, -X = tail, +Z = up, 1 unit = 1 cm, ~11 cm nose to caudal tip.
 #   Bones: Root, Spine0..Spine5, Tail, PecL, PecR (exactly these names).
-import math, os, sys
+import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fishlib as F
@@ -19,7 +19,7 @@ EXPORT = os.path.join(ROOT, "export")
 LENGTH = 8.2             # nose to caudal peduncle; the caudal fin adds ~2.8 cm
 HALF = LENGTH / 2.0
 SPINE = 6
-SCALE_CELL = 0.18
+SCALE_CELL = 0.26
 
 # Rounded oval; the very blunt head comes from the low `rise` (the silhouette fills out fast).
 PROFILE = F.hump(0.36, 2.55, 0.26, rise=0.42)
@@ -48,7 +48,7 @@ def anal(c):
 
 
 def caudal(c):
-    return F.caudal_outline(c, reach=2.8, spread=2.0, notch=0.5)
+    return F.caudal_outline(c, reach=2.8, spread=2.0, notch=0.5, n=48)
 
 
 def pec(c):
@@ -56,9 +56,10 @@ def pec(c):
 
 
 def pec_place(sign):
-    """Roll the flat XZ fan onto the flank and tilt its trailing tip down."""
-    y = WIDTH(0.30) * 0.9
-    return dict(rotate=(sign * math.pi / 2, -0.35, 0.0), translate=(0.0, sign * y, -0.3))
+    """Park the flat XZ fan against the flank: it already lies in the body's side plane, so it
+    only needs a small downward pitch and an outward flare of the trailing tip."""
+    y = WIDTH(0.30) * 1.0
+    return dict(rotate=(0.0, -0.35, -sign * 0.30), translate=(0.0, sign * y, -0.3))
 
 
 def build_nodes(nt, bsdf, c):
@@ -79,9 +80,9 @@ def build_nodes(nt, bsdf, c):
         col = F.mix_over(nt, col, bar, WHITE)
     col = F.paint_eye(nt, col, (EYE_X, EYE_Z), EYE_R)
     nt.links.new(col, bsdf.inputs["Base Color"])
-    height, rough = F.scale_pattern(nt, SCALE_CELL)
-    bump = nt.nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 1.0
-    bump.inputs["Distance"].default_value = 0.09
+    height, rough = F.scale_pattern_world(nt, SCALE_CELL)
+    bump = nt.nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 0.8
+    bump.inputs["Distance"].default_value = 0.07
     nt.links.new(height, bump.inputs["Height"])
     nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     rmap = nt.nodes.new("ShaderNodeMapRange")
@@ -94,7 +95,7 @@ def build_nodes(nt, bsdf, c):
 SPEC = dict(
     name="Clownfish",
     length=LENGTH, profile=PROFILE, belly=BELLY, width=WIDTH,
-    sections=26, ring_segments=18,
+    sections=36, ring_segments=24,
     eye=dict(centre=(EYE_X, EYE_Z), radius=EYE_R, sink=0.16, out=0.55),
     fins_membrane=[
         dict(name="DorsalFin", outline=dorsal, thickness_root=0.26, thickness_edge=0.035,
@@ -113,6 +114,8 @@ SPEC = dict(
     spine=SPINE,
     cam_loc=(14.0, -31.0, 7.0),
     cam_rot=(1.35, 0, 0.42),
+    pec_window=(-0.30, 0.60),
+    preview_fill=1.6,
     root_dir=ROOT,
     export_dir=EXPORT,
 )

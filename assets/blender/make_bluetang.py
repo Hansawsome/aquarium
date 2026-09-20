@@ -9,7 +9,7 @@
 # Conventions (must match the Unreal import side):
 #   +X = head, -X = tail, +Z = up, 1 unit = 1 cm, ~25 cm nose to caudal tip.
 #   Bones: Root, Spine0..Spine5, Tail, PecL, PecR (exactly these names).
-import math, os, sys
+import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fishlib as F
@@ -20,7 +20,7 @@ EXPORT = os.path.join(ROOT, "export")
 LENGTH = 17.0            # nose to caudal peduncle; the caudal fin adds ~8 cm
 HALF = LENGTH / 2.0
 SPINE = 6
-SCALE_CELL = 0.42        # scale cell size in cm, ~1/30 of the body height
+SCALE_CELL = 0.63        # scale cell size in cm, ~1/30 of the body height
 
 # Silhouette: back crest well forward, deep belly behind it, very narrow across.
 PROFILE = F.hump(0.30, 6.6, 0.16, rise=0.75)
@@ -46,7 +46,7 @@ def anal(c):
 
 
 def caudal(c):
-    return F.caudal_outline(c, reach=8.0, spread=5.6, notch=3.0)
+    return F.caudal_outline(c, reach=8.0, spread=5.6, notch=3.0, n=48)
 
 
 def pec(c):
@@ -54,10 +54,10 @@ def pec(c):
 
 
 def pec_place(sign):
-    """Pectorals are built flat in XZ, so roll them 90 degrees onto the flank and tilt the
-    trailing tip down before they are joined."""
-    y = WIDTH(0.27) * 0.9
-    return dict(rotate=(sign * math.pi / 2, -0.35, 0.0), translate=(0.0, sign * y, -0.6))
+    """Park the flat XZ fan against the flank: it already lies in the body's side plane, so it
+    only needs a small downward pitch and an outward flare of the trailing tip."""
+    y = WIDTH(0.27) * 1.0
+    return dict(rotate=(0.0, -0.35, -sign * 0.30), translate=(0.0, sign * y, -0.6))
 
 
 def build_nodes(nt, bsdf, c):
@@ -77,9 +77,9 @@ def build_nodes(nt, bsdf, c):
     col = F.mix_over(nt, col, tail, YELLOW)
     col = F.paint_eye(nt, col, (EYE_X, EYE_Z), EYE_R)
     nt.links.new(col, bsdf.inputs["Base Color"])
-    height, rough = F.scale_pattern(nt, SCALE_CELL)
-    bump = nt.nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 1.0
-    bump.inputs["Distance"].default_value = 0.22
+    height, rough = F.scale_pattern_world(nt, SCALE_CELL)
+    bump = nt.nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 0.8
+    bump.inputs["Distance"].default_value = 0.15
     nt.links.new(height, bump.inputs["Height"])
     nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     rmap = nt.nodes.new("ShaderNodeMapRange")       # keep roughness in a plausible wet range
@@ -92,7 +92,7 @@ def build_nodes(nt, bsdf, c):
 SPEC = dict(
     name="BlueTang",
     length=LENGTH, profile=PROFILE, belly=BELLY, width=WIDTH,
-    sections=26, ring_segments=18,
+    sections=36, ring_segments=24,
     eye=dict(centre=(EYE_X, EYE_Z), radius=EYE_R, sink=0.35, out=0.55),
     fins_membrane=[
         dict(name="DorsalFin", outline=dorsal, thickness_root=0.5, thickness_edge=0.06,
@@ -111,6 +111,8 @@ SPEC = dict(
     spine=SPINE,
     cam_loc=(26.0, -58.0, 13.0),
     cam_rot=(1.35, 0, 0.42),
+    pec_window=(-0.30, 0.60),
+    preview_fill=1.6,
     root_dir=ROOT,
     export_dir=EXPORT,
 )
