@@ -1,14 +1,14 @@
 # assets/blender/make_damselfish.py
-# Damselfish (Chrysiptera sp.) species spec: small streamlined body, modest fins,
-# 10-bone armature, baked procedural base color. fishlib.build_species runs the
-# pipeline and writes Damselfish.blend / export/Damselfish.fbx for Unreal.
+# Damselfish (Chrysiptera): a small tapered oval, dark blue over the head and back brightening
+# to cyan at the tail. fishlib.build_species runs the profile pipeline (lofted body, eyes,
+# membrane fins, BaseColor/Normal/Roughness bake) and writes Damselfish.blend /
+# export/Damselfish.fbx.
 #
 # Run: /Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_damselfish.py
 #
-# Conventions (must match the Unreal import side):
-#   +X = head, -X = tail, +Z = up, 1 unit = 1 cm, body length ~7 cm.
+# Conventions: +X = head, -X = tail, +Z = up, 1 unit = 1 cm, ~7 cm nose to caudal tip.
 #   Bones: Root, Spine0..Spine5, Tail, PecL, PecR (exactly these names).
-import os, sys
+import math, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fishlib as F
@@ -16,82 +16,93 @@ import fishlib as F
 ROOT = os.path.dirname(os.path.abspath(__file__))
 EXPORT = os.path.join(ROOT, "export")
 
-BODY_LEN = 7.0    # cm
-BODY_H = 3.4
-BODY_W = 1.6
-TAPER_Z = 0.50    # tail taper of the hull height; shared by build_body and ctx["body_h"]
-TAPER_Y = 0.45
+LENGTH = 5.4             # nose to caudal peduncle; the caudal fin adds ~1.8 cm
+HALF = LENGTH / 2.0
 SPINE = 6
+SCALE_CELL = 0.11
+
+# Small tapered oval: shallower than the tangs and pinched hard into the peduncle.
+PROFILE = F.hump(0.34, 1.45, 0.16, rise=0.55)
+BELLY = F.hump(0.44, 1.30, 0.14, rise=0.55)
+WIDTH = F.hump(0.34, 0.68, 0.22, rise=0.45)
+
+EYE_T = 0.13
+EYE_X = HALF - EYE_T * LENGTH
+EYE_Z = PROFILE(EYE_T) * 0.30
+EYE_R = 0.26
+
+NAVY = (0.02, 0.05, 0.32, 1)
+CYAN = (0.05, 0.62, 0.78, 1)
+DARK = (0.01, 0.02, 0.14, 1)
 
 
-# ---------- fins (flat plates joined to body; fin roots sit at 70% of the local
-# ---------- body half-height so the plates overlap the hull) ----------
-def tail_verts(c):
-    """Small rounded caudal fan reaching just past the Tail bone tip (-L - 0.514*L)."""
-    L, H = c["L"], c["BODY_H"]
-    return [(-L + L * 0.08, 0, H * 0.24), (-L - L * 0.52, 0, H * 0.48),
-            (-L - L * 0.44, 0, 0),
-            (-L - L * 0.52, 0, -H * 0.48), (-L + L * 0.08, 0, -H * 0.24)]
+def dorsal(c):
+    return F.sail_outline(c, 0.20, 0.88, 0.9, sign=1, root_frac=0.55, peak=0.5)
 
 
-def dorsal_verts(c):
-    """Low, simple dorsal ridge."""
-    L, H, body_h = c["L"], c["BODY_H"], c["body_h"]
-    return [(L * 0.50, 0, body_h(L * 0.50) * 0.7), (0, 0, body_h(0) * 0.7),
-            (-L * 0.58, 0, body_h(-L * 0.58) * 0.7),
-            (-L * 0.58, 0, H * 0.45), (0, 0, H * 0.62), (L * 0.45, 0, H * 0.45)]
+def anal(c):
+    return F.sail_outline(c, 0.52, 0.88, 0.8, sign=-1, root_frac=0.55, peak=0.5)
 
 
-def anal_verts(c):
-    """Short anal fin near the tail."""
-    L, H, body_h = c["L"], c["BODY_H"], c["body_h"]
-    return [(L * 0.05, 0, -body_h(L * 0.05) * 0.7), (-L * 0.55, 0, -body_h(-L * 0.55) * 0.7),
-            (-L * 0.55, 0, -H * 0.45), (0.0, 0, -H * 0.55)]
+def caudal(c):
+    return F.caudal_outline(c, reach=1.9, spread=1.25, notch=0.55)
 
 
-def pecL_verts(c):
-    L, H, Y = c["L"], c["BODY_H"], c["PEC_ROOT_Y"]
-    return [(L * 0.35, Y, H * 0.06), (L * 0.10, Y + L * 0.34, -H * 0.14),
-            (0.0, Y + L * 0.26, -H * 0.22), (L * 0.25, Y, -H * 0.14)]
+def pec(c):
+    return F.fan_outline(c, 0.30, 1.6, 1.1)
 
 
-def pecR_verts(c):
-    L, H, Y = c["L"], c["BODY_H"], c["PEC_ROOT_Y"]
-    return [(L * 0.35, -Y, H * 0.06), (L * 0.25, -Y, -H * 0.14),
-            (0.0, -Y - L * 0.26, -H * 0.22), (L * 0.10, -Y - L * 0.34, -H * 0.14)]
+def pec_place(sign):
+    """Roll the flat XZ fan onto the flank and tilt its trailing tip down."""
+    y = WIDTH(0.30) * 0.9
+    return dict(rotate=(sign * math.pi / 2, -0.3, 0.0), translate=(0.0, sign * y, -0.18))
 
 
-# ---------- procedural material ----------
-DEEP_BLUE = (0.05, 0.15, 0.60, 1)   # dark blue body
-CYAN = (0.25, 0.60, 0.95, 1)        # brighter rear half
-
-
-def damselfish_color(nt, bsdf, c):
-    """Deep blue body brightening to cyan toward the tail (soft signed ramp along x)."""
-    L = c["L"]
+def build_nodes(nt, bsdf, c):
+    """Dark blue head and back running to cyan over the tail, painted eyes and a fine voronoi
+    scale pattern driving the bump and the roughness."""
     sep = F.position_axis(nt)
-    # signed ramp: 0 at x = -L*0.30, rising to 1 at x = -L*0.60 (From Min > From Max)
-    tail = F.axis_band_mask(nt, sep.outputs["X"], from_min=-L * 0.30, from_max=-L * 0.60,
-                            use_abs=False)
-    col = F.mix_over(nt, DEEP_BLUE, tail, CYAN)
+    aft = F.axis_band_mask(nt, sep.outputs["X"], from_min=c["L"] * 0.45,
+                           from_max=-c["L"] * 0.85, use_abs=False)
+    col = F.mix_over(nt, NAVY, aft, CYAN)
+    back = F.axis_band_mask(nt, sep.outputs["Z"], from_min=c["BODY_H"] * 0.10,
+                            from_max=c["BODY_H"] * 0.42, use_abs=False)
+    col = F.mix_over(nt, col, back, DARK)
+    col = F.paint_eye(nt, col, (EYE_X, EYE_Z), EYE_R)
     nt.links.new(col, bsdf.inputs["Base Color"])
+    height, rough = F.scale_pattern(nt, SCALE_CELL)
+    bump = nt.nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 1.0
+    bump.inputs["Distance"].default_value = 0.055
+    nt.links.new(height, bump.inputs["Height"])
+    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    rmap = nt.nodes.new("ShaderNodeMapRange")
+    rmap.inputs["To Min"].default_value = 0.18
+    rmap.inputs["To Max"].default_value = 0.55
+    nt.links.new(rough, rmap.inputs["Value"])
+    nt.links.new(rmap.outputs[0], bsdf.inputs["Roughness"])
 
 
 SPEC = dict(
     name="Damselfish",
-    body=(BODY_LEN, BODY_H, BODY_W, TAPER_Z, TAPER_Y),
-    fin_thickness=0.12,
-    fins=[
-        ("TailFin", tail_verts, [(0, 1, 2), (0, 2, 4), (2, 3, 4)]),
-        ("DorsalFin", dorsal_verts, [(0, 1, 4, 5), (1, 2, 3, 4)]),
-        ("AnalFin", anal_verts, [(0, 1, 2, 3)]),
-        ("PecFinL", pecL_verts, [(0, 1, 2, 3)]),
-        ("PecFinR", pecR_verts, [(0, 1, 2, 3)]),
+    length=LENGTH, profile=PROFILE, belly=BELLY, width=WIDTH,
+    sections=26, ring_segments=18,
+    eye=dict(centre=(EYE_X, EYE_Z), radius=EYE_R, sink=0.1, out=0.55),
+    fins_membrane=[
+        dict(name="DorsalFin", outline=dorsal, thickness_root=0.16, thickness_edge=0.02,
+             rays=12, ray_depth=0.09, steps=5),
+        dict(name="AnalFin", outline=anal, thickness_root=0.15, thickness_edge=0.02,
+             rays=9, ray_depth=0.08, steps=5),
+        dict(name="TailFin", outline=caudal, thickness_root=0.18, thickness_edge=0.025,
+             rays=10, ray_depth=0.09, steps=5),
+        dict(name="PecFinL", outline=pec, thickness_root=0.13, thickness_edge=0.02,
+             rays=8, ray_depth=0.07, steps=4, **pec_place(1.0)),
+        dict(name="PecFinR", outline=pec, thickness_root=0.13, thickness_edge=0.02,
+             rays=8, ray_depth=0.07, steps=4, **pec_place(-1.0)),
     ],
-    color_fn=damselfish_color,
-    rig=dict(pec_z=0.25, tail_tip_x=-BODY_LEN / 2 - 1.8, pec_span_y=1.4, pec_drop_z=0.8),
+    build_nodes=build_nodes,
+    rig=dict(pec_z=0.0, tail_tip_x=-HALF - 1.1, pec_span_y=1.1, pec_drop_z=0.7),
     spine=SPINE,
-    cam_loc=(11.2, -25.6, 5.6),   # pulled back 1.6x so fins stay in frame
+    cam_loc=(9.0, -20.0, 4.5),
     cam_rot=(1.35, 0, 0.42),
     root_dir=ROOT,
     export_dir=EXPORT,
@@ -99,5 +110,6 @@ SPEC = dict(
 
 r = F.build_species(SPEC)
 
-print("DAMSELFISH_OK verts=%d bones=%d unweighted=%d rootMaxW=%.3f pecStray=%d"
-      % (r["verts"], r["bones"], r["unweighted"], r["root_max_w"], r["pec_stray"]))
+print("DAMSELFISH_OK verts=%d bones=%d unweighted=%d rootMaxW=%.3f pecStray=%d maps=%s"
+      % (r["verts"], r["bones"], r["unweighted"], r["root_max_w"], r["pec_stray"],
+         ",".join(os.path.basename(r["maps"][k]) for k in ("BaseColor", "Normal", "Roughness"))))

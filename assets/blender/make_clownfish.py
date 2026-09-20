@@ -1,15 +1,14 @@
 # assets/blender/make_clownfish.py
-# Clownfish (Amphiprion ocellaris) species spec: small rounded body + fin plates,
-# 10-bone armature, baked procedural base color (orange with three white bars,
-# dark-edged). fishlib.build_species runs the pipeline and writes
-# Clownfish.blend / export/Clownfish.fbx for Unreal.
+# Clownfish (Amphiprion ocellaris): a rounded oval with a blunt head, three white bars with
+# dark edges on orange, a rounded caudal and prominent pectorals. fishlib.build_species runs
+# the profile pipeline (lofted body, eyes, membrane fins, BaseColor/Normal/Roughness bake)
+# and writes Clownfish.blend / export/Clownfish.fbx.
 #
 # Run: /Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_clownfish.py
 #
-# Conventions (must match the Unreal import side):
-#   +X = head, -X = tail, +Z = up, 1 unit = 1 cm, body length ~11 cm.
+# Conventions: +X = head, -X = tail, +Z = up, 1 unit = 1 cm, ~11 cm nose to caudal tip.
 #   Bones: Root, Spine0..Spine5, Tail, PecL, PecR (exactly these names).
-import os, sys
+import math, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fishlib as F
@@ -17,116 +16,102 @@ import fishlib as F
 ROOT = os.path.dirname(os.path.abspath(__file__))
 EXPORT = os.path.join(ROOT, "export")
 
-BODY_LEN = 11.0   # cm
-BODY_H = 5.0
-BODY_W = 2.2
-TAPER_Z = 0.5     # rounder hull than the tang; shared by build_body and ctx["body_h"]
-TAPER_Y = 0.45
-FIN_T = 0.15      # fin plate thickness (cm)
+LENGTH = 8.2             # nose to caudal peduncle; the caudal fin adds ~2.8 cm
+HALF = LENGTH / 2.0
 SPINE = 6
+SCALE_CELL = 0.18
+
+# Rounded oval; the very blunt head comes from the low `rise` (the silhouette fills out fast).
+PROFILE = F.hump(0.36, 2.55, 0.26, rise=0.42)
+BELLY = F.hump(0.44, 2.35, 0.22, rise=0.42)
+WIDTH = F.hump(0.36, 1.25, 0.30, rise=0.38)
+
+EYE_T = 0.13
+EYE_X = HALF - EYE_T * LENGTH
+EYE_Z = PROFILE(EYE_T) * 0.30
+EYE_R = 0.42
+
+ORANGE = (0.95, 0.30, 0.02, 1)
+DEEP = (0.66, 0.16, 0.01, 1)
+WHITE = (0.95, 0.95, 0.93, 1)
+EDGE = (0.03, 0.02, 0.02, 1)
+
+BARS = (0.62, 0.02, -0.62)       # bar centres as a fraction of L (head, mid, peduncle)
 
 
-# ---------- fins (flat plates joined to body; fin roots sit at 70% of the local
-# ---------- body half-height so the plates overlap the hull) ----------
-def tail_verts(c):
-    """Rounded tail fin: extra rim vertices approximate the ocellaris' rounded caudal fin."""
-    L = c["L"]
-    return [(-L + 0.5, 0, 1.2), (-L - 2.0, 0, 2.2), (-L - 2.8, 0, 1.4), (-L - 3.0, 0, 0),
-            (-L - 2.8, 0, -1.4), (-L - 2.0, 0, -2.2), (-L + 0.5, 0, -1.2)]
+def dorsal(c):
+    return F.sail_outline(c, 0.18, 0.88, 1.5, sign=1, root_frac=0.55, peak=0.45)
 
 
-def dorsal_verts(c):
-    L, body_h = c["L"], c["body_h"]
-    return [(L * 0.5, 0, body_h(L * 0.5) * 0.7), (0, 0, body_h(0) * 0.7),
-            (-L * 0.55, 0, body_h(-L * 0.55) * 0.7),
-            (-L * 0.55, 0, body_h(-L * 0.55) * 0.7 + 1.2), (0, 0, body_h(0) * 0.7 + 1.8),
-            (L * 0.45, 0, body_h(L * 0.45) * 0.7 + 1.0)]
+def anal(c):
+    return F.sail_outline(c, 0.52, 0.88, 1.3, sign=-1, root_frac=0.55, peak=0.5)
 
 
-def anal_verts(c):
-    L, body_h = c["L"], c["body_h"]
-    return [(L * 0.05, 0, -body_h(L * 0.05) * 0.7), (-L * 0.55, 0, -body_h(-L * 0.55) * 0.7),
-            (-L * 0.55, 0, -body_h(-L * 0.55) * 0.7 - 1.0), (0, 0, -body_h(0) * 0.7 - 1.3)]
+def caudal(c):
+    return F.caudal_outline(c, reach=2.8, spread=2.0, notch=0.5)
 
 
-def pecL_verts(c):
-    L, Y = c["L"], c["PEC_ROOT_Y"]
-    return [(L * 0.35, Y, 0.3), (L * 0.1, Y + 2.0, -0.6), (0, Y + 1.6, -1.1), (L * 0.25, Y, -0.6)]
+def pec(c):
+    return F.fan_outline(c, 0.30, 2.6, 1.8)
 
 
-def pecR_verts(c):
-    L, Y = c["L"], c["PEC_ROOT_Y"]
-    return [(L * 0.35, -Y, 0.3), (L * 0.25, -Y, -0.6), (0, -Y - 1.6, -1.1), (L * 0.1, -Y - 2.0, -0.6)]
+def pec_place(sign):
+    """Roll the flat XZ fan onto the flank and tilt its trailing tip down."""
+    y = WIDTH(0.30) * 0.9
+    return dict(rotate=(sign * math.pi / 2, -0.35, 0.0), translate=(0.0, sign * y, -0.3))
 
 
-# ---------- procedural material ----------
-ORANGE = (0.95, 0.35, 0.03, 1)
-WHITE = (0.95, 0.95, 0.92, 1)
-DARK = (0.03, 0.02, 0.02, 1)
-EDGE = 0.35   # dark edge extends this much (cm) beyond each white bar
-
-
-def clownfish_color(nt, bsdf, c):
-    """Orange body with three white vertical bars, each with a thin dark edge.
-    Bars are masked by |x - center| in world space (body sits at the origin).
-
-    Kept as a hand-written graph: expressing it through fishlib.axis_band_mask /
-    mix_over reproduced the look but shifted three subpixels of the bake by 1/255,
-    so the original node wiring stays verbatim to keep T_Clownfish_BaseColor.png
-    byte-identical."""
-    L = c["L"]
-    # (center x, half width) of the three vertical bars: head, middle, tail
-    bars = [(L * 0.55, 0.7), (0.0, 0.9), (-L * 0.6, 0.6)]
-    geo = nt.nodes.new("ShaderNodeNewGeometry")
-    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
-    nt.links.new(geo.outputs["Position"], sep.inputs[0])
-
-    def bar_mask(center, width):
-        """1 inside |x-center| < width*0.85, ramping to 0 at width (inverted MapRange).
-        The short ramp keeps the dark rim between the white bar and the orange readable."""
-        d = nt.nodes.new("ShaderNodeMath"); d.operation = 'SUBTRACT'; d.inputs[1].default_value = center
-        nt.links.new(sep.outputs["X"], d.inputs[0])
-        a = nt.nodes.new("ShaderNodeMath"); a.operation = 'ABSOLUTE'
-        nt.links.new(d.outputs[0], a.inputs[0])
-        # From Min > From Max is intentional: factor rises as |x-center| falls below width
-        ramp = nt.nodes.new("ShaderNodeMapRange")
-        ramp.inputs["From Min"].default_value = width; ramp.inputs["From Max"].default_value = width * 0.85
-        nt.links.new(a.outputs[0], ramp.inputs["Value"])
-        return ramp.outputs[0]
-
-    def mix_over(base_socket, mask_socket, color):
-        m = nt.nodes.new("ShaderNodeMix"); m.data_type = 'RGBA'
-        m.inputs["B"].default_value = color
-        nt.links.new(base_socket, m.inputs["A"])
-        nt.links.new(mask_socket, m.inputs["Factor"])
-        return m.outputs["Result"]
-
-    base = nt.nodes.new("ShaderNodeRGB"); base.outputs[0].default_value = ORANGE
-    col = base.outputs[0]
-    for cx, w in bars:                       # dark edge first, then white on top
-        col = mix_over(col, bar_mask(cx, w + EDGE), DARK)
-        col = mix_over(col, bar_mask(cx, w), WHITE)
+def build_nodes(nt, bsdf, c):
+    """Orange body darkening over the back, three dark-edged white bars, painted eyes and a
+    fine voronoi scale pattern."""
+    sep = F.position_axis(nt)
+    back = F.axis_band_mask(nt, sep.outputs["Z"], from_min=c["BODY_H"] * 0.12,
+                            from_max=c["BODY_H"] * 0.45, use_abs=False)
+    col = F.mix_over(nt, ORANGE, back, DEEP)
+    for frac in BARS:
+        centre = c["L"] * frac
+        # the dark edge is a wider band laid down first, the white bar sits inside it
+        edge = F.axis_band_mask(nt, sep.outputs["X"], center=centre,
+                                half_width=c["L"] * 0.13, ramp=c["L"] * 0.03)
+        col = F.mix_over(nt, col, edge, EDGE)
+        bar = F.axis_band_mask(nt, sep.outputs["X"], center=centre,
+                               half_width=c["L"] * 0.08, ramp=c["L"] * 0.03)
+        col = F.mix_over(nt, col, bar, WHITE)
+    col = F.paint_eye(nt, col, (EYE_X, EYE_Z), EYE_R)
     nt.links.new(col, bsdf.inputs["Base Color"])
+    height, rough = F.scale_pattern(nt, SCALE_CELL)
+    bump = nt.nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 1.0
+    bump.inputs["Distance"].default_value = 0.09
+    nt.links.new(height, bump.inputs["Height"])
+    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    rmap = nt.nodes.new("ShaderNodeMapRange")
+    rmap.inputs["To Min"].default_value = 0.20
+    rmap.inputs["To Max"].default_value = 0.58
+    nt.links.new(rough, rmap.inputs["Value"])
+    nt.links.new(rmap.outputs[0], bsdf.inputs["Roughness"])
 
-
-L_HALF = BODY_LEN / 2
 
 SPEC = dict(
     name="Clownfish",
-    body=(BODY_LEN, BODY_H, BODY_W, TAPER_Z, TAPER_Y),
-    fin_thickness=FIN_T,
-    fins=[
-        ("TailFin", tail_verts, [(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 5), (0, 5, 6)]),
-        ("DorsalFin", dorsal_verts, [(0, 1, 4, 5), (1, 2, 3, 4)]),
-        ("AnalFin", anal_verts, [(0, 1, 2, 3)]),
-        ("PecFinL", pecL_verts, [(0, 1, 2, 3)]),
-        ("PecFinR", pecR_verts, [(0, 1, 2, 3)]),
+    length=LENGTH, profile=PROFILE, belly=BELLY, width=WIDTH,
+    sections=26, ring_segments=18,
+    eye=dict(centre=(EYE_X, EYE_Z), radius=EYE_R, sink=0.16, out=0.55),
+    fins_membrane=[
+        dict(name="DorsalFin", outline=dorsal, thickness_root=0.26, thickness_edge=0.035,
+             rays=12, ray_depth=0.14, steps=5),
+        dict(name="AnalFin", outline=anal, thickness_root=0.24, thickness_edge=0.03,
+             rays=9, ray_depth=0.12, steps=5),
+        dict(name="TailFin", outline=caudal, thickness_root=0.3, thickness_edge=0.04,
+             rays=10, ray_depth=0.14, steps=5),
+        dict(name="PecFinL", outline=pec, thickness_root=0.22, thickness_edge=0.03,
+             rays=8, ray_depth=0.12, steps=4, **pec_place(1.0)),
+        dict(name="PecFinR", outline=pec, thickness_root=0.22, thickness_edge=0.03,
+             rays=8, ray_depth=0.12, steps=4, **pec_place(-1.0)),
     ],
-    color_fn=clownfish_color,
-    rig=dict(pec_z=0.3, tail_tip_x=-L_HALF - 2.6, pec_span_y=2.0, pec_drop_z=1.2),
+    build_nodes=build_nodes,
+    rig=dict(pec_z=0.0, tail_tip_x=-HALF - 1.7, pec_span_y=1.6, pec_drop_z=1.0),
     spine=SPINE,
-    pec_window=(0.0, 0.4),
-    cam_loc=(19.2, -44.8, 9.6),   # pulled back 1.6x so fins stay in frame
+    cam_loc=(14.0, -31.0, 7.0),
     cam_rot=(1.35, 0, 0.42),
     root_dir=ROOT,
     export_dir=EXPORT,
@@ -134,5 +119,6 @@ SPEC = dict(
 
 r = F.build_species(SPEC)
 
-print("CLOWNFISH_OK verts=%d bones=%d unweighted=%d rootMaxW=%.3f pecStray=%d"
-      % (r["verts"], r["bones"], r["unweighted"], r["root_max_w"], r["pec_stray"]))
+print("CLOWNFISH_OK verts=%d bones=%d unweighted=%d rootMaxW=%.3f pecStray=%d maps=%s"
+      % (r["verts"], r["bones"], r["unweighted"], r["root_max_w"], r["pec_stray"],
+         ",".join(os.path.basename(r["maps"][k]) for k in ("BaseColor", "Normal", "Roughness"))))

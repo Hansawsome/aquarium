@@ -7,7 +7,12 @@ Conventions (must match the Unreal import side):
     +X = head, -X = tail, +Z = up, 1 unit = 1 cm.
     Bones: Root, Spine0..Spine{spine-1}, Tail, PecL, PecR (exactly these names).
 
-Required call order (each step assumes the previous ones ran, object mode throughout):
+Two body paths exist. The classic path (still used by make_corals.py) builds a tapered
+sphere and bakes base colour only. The profile path (M4a, used by the five fish) lofts the
+body from silhouette functions, adds eyeballs and tapered membrane fins, and bakes a full
+BaseColor/Normal/Roughness set.
+
+Classic call order (each step assumes the previous ones ran, object mode throughout):
     1. reset_scene()                       fresh empty scene, cm units
     2. build_body(...)                     body mesh at the origin (world-space masks rely on this)
     3. add_fin(...) x N                    fin plates with an unapplied Solidify modifier
@@ -20,8 +25,18 @@ Required call order (each step assumes the previous ones ran, object mode throug
    10. save_and_export(...)                .blend then FBX (body + armature selection only)
    11. render_preview(...)                 adds camera/sun and switches to EEVEE; run last
 
-build_species(spec) runs exactly that order from a data-only species description; the
-make_<species>.py scripts are specs plus one build_species call.
+Profile call order (steps 7..11 are identical to the classic path):
+    1. reset_scene()
+    2. build_body_profile(...)             lofted silhouette body at the origin
+    3. add_eye(...) x2, add_membrane_fin(...) x N   separate objects in body space
+    4. join_fins(body, parts)              joins eyes and fins into the body, shade smooth
+    5. unwrap(body)                        smart UV project
+    6. bake_maps(...)                      BaseColor + Normal + Roughness bake (CYCLES)
+    7..11 build_rig / skin / assert_rig_contract / save_and_export / render_preview
+
+build_species(spec) runs whichever order the spec asks for -- the profile path when the spec
+carries profile/belly/width callables, the classic path otherwise; the make_<species>.py
+scripts are specs plus one build_species call.
 """
 import bpy, bmesh, math, mathutils, os
 
@@ -298,7 +313,12 @@ def build_species(spec):
     cam_loc, cam_rot ((1.35, 0, 0.42)), root_dir, export_dir, texture_size (2048),
     preview_name (preview_<name.lower()>.png), pec_window ((-0.05, 0.45)).
     ctx = {"L", "BODY_H", "BODY_W", "PEC_ROOT_Y", "body_h"}.
-    Returns dict(verts, bones, unweighted, root_max_w, pec_stray)."""
+    Returns dict(verts, bones, unweighted, root_max_w, pec_stray).
+
+    A spec that carries profile/belly/width callables takes the profile path instead
+    (_build_species_profile); see that function for its extra keys."""
+    if "profile" in spec:
+        return _build_species_profile(spec)
     name = spec["name"]
     body_len, body_h_, body_w, taper_z, taper_y = spec["body"]
     L = body_len / 2
@@ -609,3 +629,209 @@ def _assert_not_degenerate(img, suffix, min_variance=1e-6):
         raise RuntimeError("baked %s map is degenerate (max per-channel pixel variance %.3g, "
                            "mean %.3f); nothing was baked" % (suffix, best_var, best_mean))
     return best_var
+
+
+def radial_mask(nt, centre, radius, softness=0.35):
+    """0..1 disc mask around a world-space (x, z) point, measured in the XZ plane so it wraps
+    both flanks of the fish at once. Used to paint the iris and pupil on the joined eyeball
+    without trusting its smart-projected UV island. Returns a socket."""
+    cx, cz = centre
+    sep = position_axis(nt)
+    dx = nt.nodes.new("ShaderNodeMath"); dx.operation = 'SUBTRACT'
+    dx.inputs[1].default_value = cx
+    nt.links.new(sep.outputs["X"], dx.inputs[0])
+    dz = nt.nodes.new("ShaderNodeMath"); dz.operation = 'SUBTRACT'
+    dz.inputs[1].default_value = cz
+    nt.links.new(sep.outputs["Z"], dz.inputs[0])
+    sx = nt.nodes.new("ShaderNodeMath"); sx.operation = 'MULTIPLY'
+    nt.links.new(dx.outputs[0], sx.inputs[0]); nt.links.new(dx.outputs[0], sx.inputs[1])
+    sz = nt.nodes.new("ShaderNodeMath"); sz.operation = 'MULTIPLY'
+    nt.links.new(dz.outputs[0], sz.inputs[0]); nt.links.new(dz.outputs[0], sz.inputs[1])
+    add = nt.nodes.new("ShaderNodeMath"); add.operation = 'ADD'
+    nt.links.new(sx.outputs[0], add.inputs[0]); nt.links.new(sz.outputs[0], add.inputs[1])
+    dist = nt.nodes.new("ShaderNodeMath"); dist.operation = 'SQRT'
+    nt.links.new(add.outputs[0], dist.inputs[0])
+    ramp = nt.nodes.new("ShaderNodeMapRange")          # 1 inside the disc, 0 outside the soft rim
+    ramp.inputs["From Min"].default_value = radius * (1.0 + softness)
+    ramp.inputs["From Max"].default_value = radius
+    ramp.clamp = True
+    nt.links.new(dist.outputs[0], ramp.inputs["Value"])
+    return ramp.outputs[0]
+
+
+def _smoothstep(u):
+    u = min(1.0, max(0.0, u))
+    return u * u * (3.0 - 2.0 * u)
+
+
+def hump(peak_t, peak, tail_frac=0.18, rise=1.0, fall=1.0):
+    """Silhouette function factory for build_body_profile: 0 at t=0, `peak` at t=peak_t,
+    peak*tail_frac at t=1. Starting at 0 satisfies build_body_profile's caller contract
+    (ease the nose yourself or the head comes out a chopped slab). rise < 1 blunts the head,
+    rise > 1 draws it out into a snout; fall does the same for the tail side."""
+    def f(t):
+        if t <= peak_t:
+            return peak * _smoothstep(t / max(1e-6, peak_t)) ** rise
+        u = _smoothstep((1.0 - t) / max(1e-6, 1.0 - peak_t)) ** fall
+        return peak * (tail_frac + (1.0 - tail_frac) * u)
+    return f
+
+
+def polyline(points, n):
+    """Resample a list of (x, z) key points into n evenly spaced points along the polyline.
+    Membrane fins want 30-40 outline points; this turns a handful of hand-placed keys into
+    an outline dense enough for smooth rays."""
+    segs = [(mathutils.Vector(a), mathutils.Vector(b)) for a, b in zip(points, points[1:])]
+    lens = [(b - a).length for a, b in segs]
+    total = sum(lens)
+    if total <= 0.0:
+        raise ValueError("polyline has zero length")
+    out = []
+    for i in range(n):
+        d = total * i / (n - 1.0)
+        for (a, b), l in zip(segs, lens):
+            if d <= l or (a, b) == segs[-1]:
+                out.append(tuple(a.lerp(b, 0.0 if l == 0 else min(1.0, d / l))))
+                break
+            d -= l
+    return out
+
+
+def _place(ob, rotate=None, translate=None):
+    """Move a freshly built part into place and apply the transform, so that the world-space
+    position masks used by the colour graph see the final coordinates."""
+    if rotate:
+        ob.rotation_euler = rotate
+    if translate:
+        ob.location = translate
+    bpy.ops.object.select_all(action='DESELECT')
+    ob.select_set(True); bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    return ob
+
+
+def _build_species_profile(spec):
+    """build_species' profile path: lofted body + eyes + membrane fins + three baked maps.
+
+    Extra spec keys (on top of the shared name/rig/spine/cam/root_dir/export_dir ones):
+        length                 body length in cm, nose to caudal peduncle (t=0 .. t=1)
+        profile, belly, width  silhouette callables of t (see build_body_profile / hump)
+        sections, ring_segments  body resolution (defaults 28 / 20)
+        eye                    dict(centre=(x, z), radius, sink) -- mirrored to both flanks
+        fins_membrane          list of dicts(name, outline=fn(ctx) -> [(x, z)], thickness_root,
+                               thickness_edge, rays, ray_depth, steps, rotate, translate)
+        build_nodes(nt, bsdf, ctx)  wires Base Color, Roughness and Bump/Normal for bake_maps
+    ctx adds profile/belly/width, x_of_t/t_of_x and top/bottom (body surface z at t).
+    Returns the classic dict plus maps={suffix: path}."""
+    name = spec["name"]
+    length = spec["length"]
+    L = length / 2.0
+    profile, belly, width = spec["profile"], spec["belly"], spec["width"]
+    ts = [i / 40.0 for i in range(41)]
+    body_h = max(profile(t) + belly(t) for t in ts)
+    body_w = 2.0 * max(width(t) for t in ts)
+    pec_root_y = body_w * 0.45
+    spine = spec.get("spine", 6)
+    export_dir = spec["export_dir"]
+    os.makedirs(export_dir, exist_ok=True)
+    ctx = {"L": L, "LENGTH": length, "BODY_H": body_h, "BODY_W": body_w,
+           "PEC_ROOT_Y": pec_root_y, "profile": profile, "belly": belly, "width": width,
+           "x_of_t": lambda t: L - t * length, "t_of_x": lambda x: (L - x) / length,
+           "top": lambda t: profile(t), "bottom": lambda t: -belly(t)}
+
+    reset_scene()
+    body = build_body_profile(name, length, profile, belly, width,
+                              sections=spec.get("sections", 28),
+                              ring_segments=spec.get("ring_segments", 20))
+    parts = []
+    eye = spec.get("eye")
+    if eye:
+        ex, ez = eye["centre"]
+        ey = width(ctx["t_of_x"](ex)) * eye.get("out", 0.85)
+        for side, sign in (("L", 1.0), ("R", -1.0)):
+            parts.append(add_eye("Eye" + side, (ex, sign * ey, ez), eye["radius"],
+                                 sink=eye.get("sink", 0.0)))
+    for f in spec.get("fins_membrane", []):
+        ob = add_membrane_fin(f["name"], f["outline"](ctx), f["thickness_root"],
+                              f["thickness_edge"], rays=f.get("rays", 0),
+                              ray_depth=f.get("ray_depth", 0.0), steps=f.get("steps", 6))
+        _place(ob, f.get("rotate"), f.get("translate"))
+        parts.append(ob)
+    join_fins(body, parts)
+    unwrap(body)
+    build_nodes = spec["build_nodes"]
+    baked = bake_maps(body, "M_" + name,
+                      lambda nt, bsdf, bctx: build_nodes(nt, bsdf, dict(bctx, **ctx)),
+                      name, export_dir, size=spec.get("texture_size", 2048))
+    rig = spec["rig"]
+    arm = build_rig(name + "Rig", L, pec_root_y, pec_z=rig["pec_z"], spine=spine,
+                    tail_tip_x=rig.get("tail_tip_x"), pec_span_y=rig["pec_span_y"],
+                    pec_drop_z=rig["pec_drop_z"])
+    skin(body, arm)
+    unweighted, root_max_w = assert_rig_contract(body, arm, spine)
+    x_min, x_max = spec.get("pec_window", (-0.05, 0.45))
+    pec_stray = pec_stray_count(body, L, x_min, x_max)
+    save_and_export(body, arm, os.path.join(spec["root_dir"], name + ".blend"),
+                    os.path.join(export_dir, name + ".fbx"))
+    preview = spec.get("preview_name", "preview_%s.png" % name.lower())
+    render_preview(os.path.join(export_dir, preview), spec["cam_loc"],
+                   spec.get("cam_rot", (1.35, 0, 0.42)))
+    return dict(verts=len(body.data.vertices), bones=len(arm.data.bones),
+                unweighted=unweighted, root_max_w=root_max_w, pec_stray=pec_stray,
+                maps={k: bpy.path.abspath(v.filepath_raw) for k, v in baked["images"].items()})
+
+
+def sail_outline(c, t0, t1, height, sign=1.0, root_frac=0.5, power=0.6, peak=0.5, n=36):
+    """Dorsal (sign=+1) or anal (sign=-1) membrane outline in body XZ space, for
+    add_membrane_fin. The rim follows the body surface between t0 and t1 pushed `height` cm
+    away from it, swelling like sin(pi*u)**power with its peak moved to `peak`. The root is a
+    single point on the mid-base sunk to root_frac of the local body surface, so the two base
+    segments of the fan lie inside the hull."""
+    surf = c["top"] if sign > 0 else c["bottom"]
+    x_of_t = c["x_of_t"]
+    rim = []
+    for i in range(n):
+        u = i / (n - 1.0)
+        t = t0 + (t1 - t0) * u
+        # skew the swell toward `peak` so a dorsal can crest forward or aft
+        v = u * 0.5 / peak if u <= peak else 0.5 + (u - peak) * 0.5 / (1.0 - peak)
+        rim.append((x_of_t(t), surf(t) + sign * height * math.sin(math.pi * v) ** power))
+    tm = (t0 + t1) / 2.0
+    return [(x_of_t(tm), surf(tm) * root_frac)] + rim
+
+
+def caudal_outline(c, reach, spread, notch, root_t=0.93, n=36):
+    """Caudal fin outline: a crescent reaching `reach` cm behind the tail tip with lobes
+    `spread` cm from the axis and a fork cutting `notch` cm back in. Root sits inside the
+    peduncle at root_t so the fin welds into the body."""
+    L = c["L"]
+    ped = max(0.4, c["top"](1.0))
+    keys = [(-L, ped), (-L - reach * 0.75, spread * 0.85), (-L - reach, spread),
+            (-L - reach + notch, 0.0),
+            (-L - reach, -spread), (-L - reach * 0.75, -spread * 0.85), (-L, -ped)]
+    return [(c["x_of_t"](root_t), 0.0)] + polyline(keys, n)
+
+
+def fan_outline(c, t_root, length, height, n=30, drop=0.0):
+    """Pectoral-style rounded fan built in the XZ plane (rotate it into place afterwards):
+    root at the body surface at t_root, rim an ellipse trailing `length` cm aft and `height`
+    cm across, optionally tilted down by `drop` cm at the far end."""
+    x0 = c["x_of_t"](t_root)
+    cx, a, b = x0 - length * 0.45, length * 0.55, height * 0.5
+    rim = []
+    for i in range(n):
+        ang = math.radians(15.0 + 330.0 * i / (n - 1.0))
+        u = (1.0 - math.cos(ang)) * 0.5          # 0 at the root end, 1 at the far end
+        rim.append((cx + a * math.cos(ang), b * math.sin(ang) - drop * u))
+    return [(x0, 0.0)] + rim
+
+
+def paint_eye(nt, base, centre, radius, sclera=(0.9, 0.9, 0.88, 1), iris=(0.12, 0.08, 0.04, 1),
+              pupil=(0.01, 0.01, 0.01, 1)):
+    """Lay sclera/iris/pupil rings over `base` using world-position radial masks instead of UVs.
+    The eyeball is joined into the body and its smart-projected UV island is unpredictable, so
+    the eye is painted from position; the XZ mask covers both flanks at once. Returns a socket."""
+    col = mix_over(nt, base, radial_mask(nt, centre, radius, softness=0.15), sclera)
+    col = mix_over(nt, col, radial_mask(nt, centre, radius * 0.72, softness=0.12), iris)
+    col = mix_over(nt, col, radial_mask(nt, centre, radius * 0.34, softness=0.15), pupil)
+    return col
