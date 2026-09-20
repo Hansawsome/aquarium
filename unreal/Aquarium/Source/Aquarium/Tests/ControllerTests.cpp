@@ -93,4 +93,38 @@ bool FControllerFrameStatsPath::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FControllerMapsKeysToDirection, "Aquarium.Controller.MapsArrowKeysToDirection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FControllerMapsKeysToDirection::RunTest(const FString&)
+{
+	using FKeys = ADiverPlayerController::FArrowKeys;
+	TestEqual(TEXT("right"), ADiverPlayerController::DirectionFor(FKeys{false, false, false, true}), FVector2D(1.f, 0.f));
+	TestEqual(TEXT("up"), ADiverPlayerController::DirectionFor(FKeys{true, false, false, false}), FVector2D(0.f, 1.f));
+	TestEqual(TEXT("opposing keys cancel"), ADiverPlayerController::DirectionFor(FKeys{true, true, true, true}), FVector2D::ZeroVector);
+	const FVector2D Diag = ADiverPlayerController::DirectionFor(FKeys{true, false, false, true});
+	TestTrue(TEXT("diagonal normalized"), FMath::IsNearlyEqual(static_cast<float>(Diag.Size()), 1.f, 1e-4f));
+	TestTrue(TEXT("diagonal points up-right"), Diag.X > 0.f && Diag.Y > 0.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FControllerAutoInput, "Aquarium.Controller.ParsesAutoInput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FControllerAutoInput::RunTest(const FString&)
+{
+	FString Pattern;
+	TestTrue(TEXT("parses"), ADiverPlayerController::ParseAutoInput(TEXT("-game -AquariumAutoInput=\"R3,U2\" -unattended"), Pattern));
+	TestEqual(TEXT("pattern"), Pattern, FString(TEXT("R3,U2")));
+
+	TestTrue(TEXT("unquoted"), ADiverPlayerController::ParseAutoInput(TEXT("-AquariumAutoInput=R3,U2"), Pattern));
+	TestEqual(TEXT("unquoted pattern"), Pattern, FString(TEXT("R3,U2")));
+
+	TestFalse(TEXT("absent"), ADiverPlayerController::ParseAutoInput(TEXT("-AquariumAutoNickname=x"), Pattern));
+	TestTrue(TEXT("cleared"), Pattern.IsEmpty());
+	TestFalse(TEXT("empty value"), ADiverPlayerController::ParseAutoInput(TEXT("-AquariumAutoInput="), Pattern));
+	TestFalse(TEXT("null"), ADiverPlayerController::ParseAutoInput(nullptr, Pattern));
+	return true;
+}
+
 #endif

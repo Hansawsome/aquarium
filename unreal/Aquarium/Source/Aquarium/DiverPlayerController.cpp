@@ -10,6 +10,10 @@
 #include "Misc/Parse.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
+#include "FishActor.h"
+#include "Framework/Application/SlateApplication.h"
+
+#include "aquarium/Steering.h"
 
 namespace
 {
@@ -62,11 +66,66 @@ void ADiverPlayerController::BeginPlay()
 	StartAutoReplayIfRequested();
 	StartUiCaptureIfRequested();
 	StartFrameStatsIfRequested();
+	StartAutoInputIfRequested();
+
+	// F-06: focus loss releases input and pauses the simulation; focus gain resumes it.
+	if (FSlateApplication::IsInitialized())
+	{
+		ActivationChangedHandle = FSlateApplication::Get().OnApplicationActivationStateChanged().AddUObject(
+			this, &ADiverPlayerController::HandleApplicationActivationChanged);
+	}
+}
+
+FVector2D ADiverPlayerController::DirectionFor(const FArrowKeys& Keys)
+{
+	aquarium::KeyState State;
+	State.up = Keys.bUp;
+	State.down = Keys.bDown;
+	State.left = Keys.bLeft;
+	State.right = Keys.bRight;
+	const aquarium::Vec2 V = aquarium::SteeringVector(State);
+	return FVector2D(V.x, V.y);
+}
+
+void ADiverPlayerController::HandleApplicationActivationChanged(bool bIsActive)
+{
+	// Releasing the keys first means a key held across the focus change cannot stay stuck down:
+	// the OS never delivers its IE_Released to us while the window is in the background.
+	ArrowKeys = FArrowKeys();
+	AAquariumGameMode* GM = GameMode();
+	if (GM == nullptr)
+	{
+		return;
+	}
+	if (AFishActor* Fish = GM->PlayerFish())
+	{
+		Fish->SetInputDirection(FVector2D::ZeroVector);
+		Fish->SetPaused(!bIsActive);
+	}
+}
+
+void ADiverPlayerController::ApplyInputToPlayerFish(float DeltaSeconds)
+{
+	AAquariumGameMode* GM = GameMode();
+	if (GM == nullptr || !GM->HasActiveSession())
+	{
+		return;
+	}
+	AFishActor* Fish = GM->PlayerFish();
+	if (Fish == nullptr)
+	{
+		return;
+	}
+	Fish->SetInputDirection(DirectionFor(ArrowKeys));
 }
 
 void ADiverPlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+#if !UE_BUILD_SHIPPING
+	AdvanceAutoInput(DeltaSeconds);
+#endif
+	ApplyInputToPlayerFish(DeltaSeconds);
 #if !UE_BUILD_SHIPPING
 	// One UI-inclusive screenshot per tick: with -benchmark -fps=N the timestep is fixed, so the
 	// frame index maps to N frames per second. -dumpmovie cannot be used for this because the
@@ -86,6 +145,11 @@ void ADiverPlayerController::Tick(float DeltaSeconds)
 
 void ADiverPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (ActivationChangedHandle.IsValid() && FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().OnApplicationActivationStateChanged().Remove(ActivationChangedHandle);
+	}
+	ActivationChangedHandle.Reset();
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(AutoSubmitTimer);
@@ -105,6 +169,15 @@ void ADiverPlayerController::SetupInputComponent()
 		// Raw key binding: works under both the legacy and the Enhanced player input classes
 		// without an action mapping or an input mapping context asset.
 		InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ADiverPlayerController::RequestExit);
+		// Arrow keys, pressed and released, so a held key keeps steering the fish (F-05).
+		InputComponent->BindKey(EKeys::Up, IE_Pressed, this, &ADiverPlayerController::PressUp);
+		InputComponent->BindKey(EKeys::Up, IE_Released, this, &ADiverPlayerController::ReleaseUp);
+		InputComponent->BindKey(EKeys::Down, IE_Pressed, this, &ADiverPlayerController::PressDown);
+		InputComponent->BindKey(EKeys::Down, IE_Released, this, &ADiverPlayerController::ReleaseDown);
+		InputComponent->BindKey(EKeys::Left, IE_Pressed, this, &ADiverPlayerController::PressLeft);
+		InputComponent->BindKey(EKeys::Left, IE_Released, this, &ADiverPlayerController::ReleaseLeft);
+		InputComponent->BindKey(EKeys::Right, IE_Pressed, this, &ADiverPlayerController::PressRight);
+		InputComponent->BindKey(EKeys::Right, IE_Released, this, &ADiverPlayerController::ReleaseRight);
 	}
 }
 
@@ -345,5 +418,108 @@ void ADiverPlayerController::WriteFrameStats()
 	}
 	FrameStatsPath.Reset();
 	FrameDeltas.Empty();
+#endif
+}
+
+bool ADiverPlayerController::ParseAutoInput(const TCHAR* CmdLine, FString& OutPattern)
+{
+	OutPattern.Reset();
+	// bShouldStopOnSeparator=false so an unquoted comma-separated pattern survives intact.
+	if (!CmdLine || !FParse::Value(CmdLine, TEXT("-AquariumAutoInput="), OutPattern, /*bShouldStopOnSeparator*/ false))
+	{
+		return false;
+	}
+	OutPattern.TrimStartAndEndInline();
+	return !OutPattern.IsEmpty();
+}
+
+TArray<ADiverPlayerController::FAutoInputStep> ADiverPlayerController::BuildAutoInputSteps(const FString& Pattern)
+{
+	TArray<FAutoInputStep> Steps;
+	TArray<FString> Tokens;
+	Pattern.ParseIntoArray(Tokens, TEXT(","), /*CullEmpty*/ true);
+	for (FString Token : Tokens)
+	{
+		Token.TrimStartAndEndInline();
+		if (Token.IsEmpty())
+		{
+			continue;
+		}
+		const TCHAR Dir = FChar::ToUpper(Token[0]);
+		FString Rest = Token.Mid(1);
+		Rest.TrimStartAndEndInline();
+		const float Seconds = FCString::Atof(*Rest);
+		if (Rest.IsEmpty() || !(Seconds > 0.f))
+		{
+			// The pattern is dev test data, so it is safe to echo; it never carries a nickname.
+			UE_LOG(LogTemp, Warning, TEXT("AquariumAutoInput: bad duration in '%s'; entry ignored"), *Token);
+			continue;
+		}
+		FAutoInputStep Step;
+		Step.Duration = Seconds;
+		switch (Dir)
+		{
+		case TEXT('R'): Step.Keys.bRight = true; break;
+		case TEXT('L'): Step.Keys.bLeft = true; break;
+		case TEXT('U'): Step.Keys.bUp = true; break;
+		case TEXT('D'): Step.Keys.bDown = true; break;
+		case TEXT('0'): break;   // no keys held
+		default:
+			UE_LOG(LogTemp, Warning, TEXT("AquariumAutoInput: unknown direction in '%s'; entry ignored"), *Token);
+			continue;
+		}
+		Steps.Add(Step);
+	}
+	return Steps;
+}
+
+void ADiverPlayerController::StartAutoInputIfRequested()
+{
+#if !UE_BUILD_SHIPPING
+	// Dev-only: replays a fixed arrow-key script so a capture shows the same swim path every run.
+	AutoInputSteps.Reset();
+	AutoInputElapsed = 0.f;
+	FString Pattern;
+	if (!ParseAutoInput(FCommandLine::Get(), Pattern))
+	{
+		return;
+	}
+	AutoInputSteps = BuildAutoInputSteps(Pattern);
+	if (AutoInputSteps.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AquariumAutoInput: no usable entries; scripted input disabled"));
+	}
+#endif
+}
+
+void ADiverPlayerController::AdvanceAutoInput(float DeltaSeconds)
+{
+#if !UE_BUILD_SHIPPING
+	if (AutoInputSteps.Num() == 0)
+	{
+		return;
+	}
+	float Total = 0.f;
+	for (const FAutoInputStep& Step : AutoInputSteps)
+	{
+		Total += Step.Duration;
+	}
+	if (!(Total > 0.f))
+	{
+		return;
+	}
+	AutoInputElapsed = FMath::Fmod(AutoInputElapsed + DeltaSeconds, Total);
+	float Cursor = AutoInputElapsed;
+	for (const FAutoInputStep& Step : AutoInputSteps)
+	{
+		if (Cursor < Step.Duration)
+		{
+			// Overwrites live key state on purpose: the script owns the input while it runs.
+			ArrowKeys = Step.Keys;
+			return;
+		}
+		Cursor -= Step.Duration;
+	}
+	ArrowKeys = AutoInputSteps.Last().Keys;
 #endif
 }
