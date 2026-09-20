@@ -497,3 +497,115 @@ def add_membrane_fin(name, outline, thickness_root, thickness_edge, rays=0, ray_
     bm.to_mesh(mesh); bm.free(); mesh.update()
     bpy.ops.object.shade_smooth()
     return ob
+
+
+def scale_pattern(nt, cell_size, sharpness=3.0):
+    """Voronoi-based scale pattern. Returns (height_socket, roughness_socket) in 0..1: feed the
+    height into a Bump node so it lands in the normal bake, the roughness into Principled."""
+    tex = nt.nodes.new("ShaderNodeTexVoronoi")
+    tex.voronoi_dimensions = '3D'
+    tex.feature = 'DISTANCE_TO_EDGE'
+    tex.inputs["Scale"].default_value = 1.0 / max(1e-4, cell_size)
+    # Distance to edge is 0 on the scale border and grows toward the middle: ramp it so each
+    # cell domes up and the borders cut in as grooves.
+    dome = nt.nodes.new("ShaderNodeMapRange")
+    dome.inputs["From Min"].default_value = 0.0
+    dome.inputs["From Max"].default_value = 0.35
+    dome.clamp = True
+    nt.links.new(tex.outputs["Distance"], dome.inputs["Value"])
+    shape = nt.nodes.new("ShaderNodeMath"); shape.operation = 'POWER'
+    shape.inputs[1].default_value = max(0.01, 1.0 / sharpness)
+    nt.links.new(dome.outputs[0], shape.inputs[0])
+    height = shape.outputs[0]
+    # Grooves stay wetter/glossier than the scale faces, so roughness rides the inverse.
+    rough = nt.nodes.new("ShaderNodeMapRange")
+    rough.inputs["To Min"].default_value = 1.0
+    rough.inputs["To Max"].default_value = 0.0
+    rough.clamp = True
+    nt.links.new(height, rough.inputs["Value"])
+    return height, rough.outputs[0]
+
+
+def _bake_image(nt, img, body, bake_type, extra=None):
+    """Make `img` the active bake target in nt and run one bake of `bake_type` onto body."""
+    node = nt.nodes.new("ShaderNodeTexImage"); node.image = img
+    for n in nt.nodes:
+        n.select = False
+    node.select = True
+    nt.nodes.active = node
+    bpy.ops.object.select_all(action='DESELECT'); body.select_set(True)
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.bake(type=bake_type, margin=8, **(extra or {}))
+    return node
+
+
+def bake_maps(body, mat_name, build_nodes, base_name, export_dir, size=2048, samples=16):
+    """Bakes base colour, normal and roughness to <export_dir>/T_<base_name>_{BaseColor,Normal,
+    Roughness}.png and rewires the baked textures into the material. build_nodes(nt, bsdf, ctx)
+    wires Base Color, Roughness and a Bump/Normal input; ctx carries {'scale_pattern': ...} and the
+    colour helpers. Normal and roughness images are saved Non-Color. Raises RuntimeError if a baked
+    map is degenerate (e.g. a normal map with near-zero pixel variance means nothing was baked).
+    Returns dict(material=..., images={'BaseColor':..., 'Normal':..., 'Roughness':...})."""
+    scene = bpy.context.scene
+    mat = bpy.data.materials.new(mat_name)
+    if mat.node_tree is None:   # Blender 5.x may return a material without a node tree
+        mat.use_nodes = True
+    nt = mat.node_tree; nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled"); bsdf.inputs["Roughness"].default_value = 0.35
+    ctx = {"scale_pattern": scale_pattern, "position_axis": position_axis,
+           "axis_band_mask": axis_band_mask, "mix_over": mix_over}
+    build_nodes(nt, bsdf, ctx)
+    nt.links.new(bsdf.outputs[0], out.inputs[0])
+    body.data.materials.append(mat)
+
+    scene.render.engine = 'CYCLES'; scene.cycles.device = 'CPU'; scene.cycles.samples = samples
+    scene.render.bake.use_pass_direct = False; scene.render.bake.use_pass_indirect = False
+    scene.render.bake.use_pass_color = True
+
+    os.makedirs(export_dir, exist_ok=True)
+    images, nodes = {}, {}
+    for suffix, bake_type, non_color in (("BaseColor", 'DIFFUSE', False),
+                                         ("Normal", 'NORMAL', True),
+                                         ("Roughness", 'ROUGHNESS', True)):
+        name = "T_%s_%s" % (base_name, suffix)
+        img = bpy.data.images.new(name, size, size, is_data=non_color)
+        if non_color:
+            img.colorspace_settings.name = 'Non-Color'
+        nodes[suffix] = _bake_image(nt, img, body, bake_type)
+        _assert_not_degenerate(img, suffix)
+        img.filepath_raw = os.path.join(export_dir, name + ".png")
+        img.file_format = 'PNG'
+        img.save()
+        images[suffix] = img
+
+    # rewire the baked maps back into the material so the .blend previews what was exported
+    nt.links.new(nodes["BaseColor"].outputs["Color"], bsdf.inputs["Base Color"])
+    nt.links.new(nodes["Roughness"].outputs["Color"], bsdf.inputs["Roughness"])
+    nmap = nt.nodes.new("ShaderNodeNormalMap")
+    nt.links.new(nodes["Normal"].outputs["Color"], nmap.inputs["Color"])
+    nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+    return dict(material=mat, images=images)
+
+
+def _assert_not_degenerate(img, suffix, min_variance=1e-6):
+    """Raise if a freshly baked map carries no signal (a flat normal map, a constant roughness).
+    Variance is measured per channel and the best channel decides: pooling R, G and B would let a
+    flat tangent normal map (a constant 0.5, 0.5, 1.0) pass on the channel spread alone.
+    Samples the buffer rather than reading every pixel of a 2k image."""
+    px = img.pixels[:]
+    n_px = len(px) // 4
+    if n_px == 0:
+        raise RuntimeError("baked %s map has no pixels" % suffix)
+    step = max(1, n_px // 20000)                   # ~20k sampled pixels
+    idx = range(0, n_px, step)
+    stats = []
+    for c in (0, 1, 2):
+        vals = [px[i * 4 + c] for i in idx]
+        mean = sum(vals) / len(vals)
+        stats.append((sum((v - mean) ** 2 for v in vals) / len(vals), mean))
+    best_var, best_mean = max(stats)
+    if best_var < min_variance:
+        raise RuntimeError("baked %s map is degenerate (max per-channel pixel variance %.3g, "
+                           "mean %.3f); nothing was baked" % (suffix, best_var, best_mean))
+    return best_var
