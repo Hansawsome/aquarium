@@ -38,10 +38,14 @@ public:
 	// Index into Catalog (not the loaded subset) of the assigned species; INDEX_NONE when inactive.
 	int32 AssignedSpeciesIndex() const;
 	AFishActor* PlayerFish() const;
+	// Number of catalog entries whose mesh loaded (the pool the session picks from).
+	int32 LoadedSpeciesCount() const { return LoadedCatalogIndices.Num(); }
 
 	// Replaces the catalog, reseeds and reloads meshes without waiting for BeginPlay.
+	// Ends any active session first so loaded indices cannot dangle.
 	void SetCatalogForTest(const TArray<FFishSpecies>& InCatalog, int32 Seed);
 
+protected:
 	virtual void BeginPlay() override;
 
 private:
@@ -50,6 +54,9 @@ private:
 	UPROPERTY() TObjectPtr<AFishActor> PlayerFishActor = nullptr;
 	// Catalog indices whose mesh loaded; the session picks among these.
 	TArray<int32> LoadedCatalogIndices;
+	// Hard references parallel to LoadedCatalogIndices. TSoftObjectPtr::Get() alone does not
+	// keep the mesh alive between BeginPlay and BeginSession in a cooked build.
+	UPROPERTY() TArray<TObjectPtr<USkeletalMesh>> LoadedMeshes;
 
 	void RebuildLoadedCatalog();
 	AFishActor* SpawnPlayerFish(USkeletalMesh* Mesh);

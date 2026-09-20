@@ -101,12 +101,14 @@ bool FSessionSeedDeterminesSpecies::RunTest(const FString&)
 	A->BeginSession(TEXT("니모"));
 	B->BeginSession(TEXT("니모"));
 	TestEqual(TEXT("same species index"), A->AssignedSpeciesIndex(), B->AssignedSpeciesIndex());
+	TestEqual(TEXT("both meshes loaded"), A->LoadedSpeciesCount(), 2);
 	bool Saw0 = false, Saw1 = false;
 	for (int32 Seed = 1; Seed <= 40; ++Seed)
 	{
 		AAquariumGameMode* G = SpawnGameMode(World, Seed, 2);
 		G->BeginSession(TEXT("x"));
-		(G->AssignedSpeciesIndex() == 0 ? Saw0 : Saw1) = true;
+		if (G->AssignedSpeciesIndex() == 0) { Saw0 = true; }
+		if (G->AssignedSpeciesIndex() == 1) { Saw1 = true; }
 	}
 	TestTrue(TEXT("both species reachable"), Saw0 && Saw1);
 	return true;

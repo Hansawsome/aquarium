@@ -25,13 +25,16 @@ AAquariumGameMode::AAquariumGameMode()
 void AAquariumGameMode::BeginPlay()
 {
 	Super::BeginPlay();
-	const int32 Seed = AssignmentSeed != 0 ? AssignmentSeed : static_cast<int32>(FDateTime::Now().GetTicks());
+	// Cycles() varies per launch even when several instances start within the same clock tick.
+	const int32 Seed = AssignmentSeed != 0 ? AssignmentSeed : static_cast<int32>(FPlatformTime::Cycles());
 	Rng.Initialize(Seed);
 	RebuildLoadedCatalog();
 }
 
 void AAquariumGameMode::SetCatalogForTest(const TArray<FFishSpecies>& InCatalog, int32 Seed)
 {
+	ensureMsgf(!Session.HasActiveSession(), TEXT("AquariumGameMode: catalog changed while a session is active"));
+	EndSession();
 	Catalog = InCatalog;
 	AssignmentSeed = Seed;
 	Rng.Initialize(Seed);
@@ -41,11 +44,14 @@ void AAquariumGameMode::SetCatalogForTest(const TArray<FFishSpecies>& InCatalog,
 void AAquariumGameMode::RebuildLoadedCatalog()
 {
 	LoadedCatalogIndices.Reset();
+	LoadedMeshes.Reset();
 	for (int32 i = 0; i < Catalog.Num(); ++i)
 	{
-		if (Catalog[i].Mesh.LoadSynchronous() != nullptr)
+		// TODO: switch to FStreamableManager async loading if the catalog grows beyond a few meshes.
+		if (USkeletalMesh* Mesh = Catalog[i].Mesh.LoadSynchronous())
 		{
 			LoadedCatalogIndices.Add(i);
+			LoadedMeshes.Add(Mesh);
 		}
 		else
 		{
@@ -69,8 +75,14 @@ EBeginSessionResult AAquariumGameMode::BeginSession(const FString& RawNickname)
 	case aquarium::BeginResult::Ok:              break;
 	}
 
-	const int32 CatalogIndex = LoadedCatalogIndices[static_cast<int32>(Session.OwnedFishIndex())];
-	PlayerFishActor = SpawnPlayerFish(Catalog[CatalogIndex].Mesh.Get());
+	PlayerFishActor = SpawnPlayerFish(LoadedMeshes[static_cast<int32>(Session.OwnedFishIndex())]);
+	if (PlayerFishActor == nullptr)
+	{
+		// Fail closed so HasActiveSession() and PlayerFish() never disagree.
+		Session.End();
+		UE_LOG(LogTemp, Warning, TEXT("AquariumGameMode: player fish spawn failed; session not started"));
+		return EBeginSessionResult::EmptyCatalog;
+	}
 	return EBeginSessionResult::Ok;
 }
 
