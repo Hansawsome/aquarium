@@ -8,6 +8,9 @@
 |---|---|---|---|---|---|---|---|---|---|
 | Poly Haven `coast_sand_01` (모래 텍스처 2K: diffuse, normal GL, roughness) | Rob Tuytel | https://polyhaven.com/a/coast_sand_01 | 2026-09-20 | CC0 1.0 (https://polyhaven.com/license) | 불필요 (자발적 표기: "Textures from Poly Haven") | 없음 | 가능 | 가능 | `assets/textures/sand/` |
 | Noto Sans KR Regular (한국어 UI 폰트) | Google / Adobe (Noto CJK 프로젝트) | https://github.com/notofonts/noto-cjk | 2026-09-20 | SIL OFL 1.1 (`assets/fonts/OFL.txt`) | 불필요 (OFL: 폰트 단독 판매 금지, 임베드·재배포 허용) | 없음 | 가능 | 가능 | `assets/fonts/` |
+| Poly Haven `boulder_01` (바위 모델, FBX 1K: diffuse/normal GL/roughness/AO) | Rico Cilliers | https://polyhaven.com/a/boulder_01 | 2026-09-20 | CC0 1.0 (https://polyhaven.com/license) | 불필요 (자발적 표기: "Models from Poly Haven") | 없음 | 가능 | 가능 | `assets/models/rocks/boulder_01/` |
+| Poly Haven `rock_07` (바위 모델, FBX 1K: diffuse/normal GL/roughness/AO) | Jenelle van Heerden | https://polyhaven.com/a/rock_07 | 2026-09-20 | CC0 1.0 (https://polyhaven.com/license) | 불필요 (자발적 표기: "Models from Poly Haven") | 없음 | 가능 | 가능 | `assets/models/rocks/rock_07/` |
+| Poly Haven `rock_09` (바위 모델, FBX 1K: diffuse/normal GL/roughness/AO) | Jenelle van Heerden | https://polyhaven.com/a/rock_09 | 2026-09-20 | CC0 1.0 (https://polyhaven.com/license) | 불필요 (자발적 표기: "Models from Poly Haven") | 없음 | 가능 | 가능 | `assets/models/rocks/rock_09/` |
 
 ## 직접 제작
 
@@ -34,7 +37,7 @@
 
 ## 조사 후보
 
-- 바위·표면 텍스처: Poly Haven의 개별 CC0 에셋. 모래 텍스처는 `coast_sand_01`로 선정 완료(위 "도입한 외부 에셋" 참고). 나머지(바위 등)는 아직 선정하지 않았다.
+- 바위·표면 텍스처: Poly Haven의 개별 CC0 에셋. 모래 텍스처는 `coast_sand_01`, 바위 모델은 `boulder_01`/`rock_07`/`rock_09`로 선정 완료(위 "도입한 외부 에셋" 참고).
 - 물고기·산호: 적합한 무료 모델을 검토하거나 Blender로 직접 제작한다.
 - 유영 애니메이션: 출처가 분명한 무료 리깅/애니메이션 또는 Blender 자체 제작.
 
