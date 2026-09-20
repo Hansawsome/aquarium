@@ -1,6 +1,6 @@
 # macOS 개발 도구와 MCP 연결
 
-상태 기준: 2026-09-20. 게임 코드와 제품 테스트는 아직 없다.
+상태 기준: 2026-09-20. 규칙 계층·Unreal 프로젝트·M1 장면은 이 문서 끝의 재현 명령으로 만든다.
 
 ## 완료
 
@@ -119,7 +119,7 @@ for s in import_bluetang.py build_reef_m1.py verify_scene.py; do
   "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -run=pythonscript -script="$PWD/unreal/Aquarium/Scripts/$s" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep -E "_OK|Traceback"
 done
 
-# 5. Unreal Automation 테스트 (8개)
+# 5. Unreal Automation 테스트 (9개)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -ExecCmds="Automation RunTests Aquarium; Quit" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep "Test Completed"
 
 # 6. 34초 유영 영상 (엔진 -benchmark -dumpmovie, 약 3.5분)
