@@ -1,7 +1,9 @@
 #!/bin/bash
 # Renders a deterministic 30 fps, 14 s capture of the M2 flow
 # (entry widget -> session with name tag -> exit -> entry widget again)
-# with the engine's own -dumpmovie path, encodes it with ffmpeg into
+# with the dev-only -AquariumCaptureUI frame capture (one UI-inclusive screenshot
+# per fixed-timestep tick; -dumpmovie is NOT used because the engine drops the
+# Slate/UMG layer while dumping a movie), encodes it with ffmpeg into
 # docs/reviews/<date>-m2-flow.mp4 and pulls three review stills out of it.
 #
 # Timeline (driven by the dev-only auto-replay flags of ADiverPlayerController):
@@ -18,7 +20,7 @@
 #     UnrealEditor.modules), then uses the EDITOR binary in -game mode.
 #   - -benchmark -fps=30 fixes the timestep, -seconds=N exits by itself.
 #   - -ForceRes is required or GameUserSettings.ini overrides the resolution.
-#   - Frames land in Saved/Screenshots/MacEditor/MovieFrame%05d.png.
+#   - Frames land in Saved/UiFrames/UiFrame%05d.png.
 #   - A watchdog kills the engine if it has not exited after WATCHDOG_SEC.
 set -euo pipefail
 
@@ -27,7 +29,7 @@ UE_ROOT="/Users/Shared/Epic Games/UE_5.8"
 UE="$UE_ROOT/Engine/Binaries/Mac/UnrealEditor"
 FFMPEG="${FFMPEG:-/opt/homebrew/bin/ffmpeg}"
 PROJ="$ROOT/unreal/Aquarium/Aquarium.uproject"
-SHOTS="$ROOT/unreal/Aquarium/Saved/Screenshots"
+FRAMES="$ROOT/unreal/Aquarium/Saved/UiFrames"
 MAP="${MAP:-ReefM1}"
 FPS="${FPS:-30}"
 SECONDS_TO_RUN="${SECONDS_TO_RUN:-14}"
@@ -46,14 +48,15 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   done
 fi
 
-rm -rf "$SHOTS"
+rm -rf "$FRAMES"
 mkdir -p "$ROOT/docs/reviews"
 
 START=$(date +%s)
 "$UE" "$PROJ" "$MAP" -game -windowed -ResX=1920 -ResY=1080 -ForceRes \
-  -benchmark -fps="$FPS" -seconds="$SECONDS_TO_RUN" -dumpmovie \
+  -benchmark -fps="$FPS" -seconds="$SECONDS_TO_RUN" \
   -notexturestreaming -unattended -nosplash -log \
   -AquariumAutoNickname="$AUTO_NICKNAME" -AquariumAutoExitAfter="$AUTO_EXIT_AFTER" \
+  -AquariumCaptureUI="$FRAMES" \
   >/dev/null 2>&1 &
 PID=$!
 
@@ -78,8 +81,7 @@ if [[ -f "$ENGINE_LOG" ]]; then
   grep -E "LogTemp: (Warning|Error)" "$ENGINE_LOG" | head -20 || true
 fi
 
-FRAMES="$(ls -d "$SHOTS"/*/ | head -1)"
-COUNT="$(ls "$FRAMES"/MovieFrame*.png | wc -l | tr -d ' ')"
+COUNT="$(ls "$FRAMES"/UiFrame*.png | wc -l | tr -d ' ')"
 echo "frames=$COUNT in $FRAMES"
 if (( COUNT < FPS * SECONDS_TO_RUN - FPS )); then
   echo "ERROR: expected about $(( FPS * SECONDS_TO_RUN )) frames, got $COUNT" >&2
@@ -89,7 +91,7 @@ fi
 # Skip the first SKIP_FRAMES frames: exposure and streaming settle during the
 # first couple of ticks, so the head of the clip would otherwise be blown out.
 SKIP_FRAMES="${SKIP_FRAMES:-15}"
-"$FFMPEG" -y -loglevel error -framerate "$FPS" -start_number "$SKIP_FRAMES" -i "$FRAMES/MovieFrame%05d.png" \
+"$FFMPEG" -y -loglevel error -framerate "$FPS" -start_number "$SKIP_FRAMES" -i "$FRAMES/UiFrame%05d.png" \
   -c:v libx264 -pix_fmt yuv420p -crf 18 "$OUT"
 echo "VIDEO_OK $OUT frames=$(( COUNT - SKIP_FRAMES )) (skipped first $SKIP_FRAMES of $COUNT)"
 

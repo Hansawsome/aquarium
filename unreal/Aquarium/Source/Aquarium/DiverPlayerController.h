@@ -27,11 +27,15 @@ public:
 	static EEntryError EntryErrorFor(EBeginSessionResult Result, const FString& Raw);
 	// Parses -AquariumAutoNickname=<name> [-AquariumAutoExitAfter=<sec>]; false when no nickname given.
 	static bool ParseAutoReplay(const TCHAR* CmdLine, FString& OutName, float& OutExitAfter);
+	// Parses -AquariumCaptureUI=<absolute dir>; false when absent or empty. Dev-only frame capture
+	// that, unlike -dumpmovie, includes the Slate/UMG layer in every frame.
+	static bool ParseUiCaptureDir(const TCHAR* CmdLine, FString& OutDir);
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 private:
 	UPROPERTY() TObjectPtr<UEntryWidget> Entry = nullptr;
@@ -42,4 +46,8 @@ private:
 	void HandleSubmitted(const FString& Raw);
 	AAquariumGameMode* GameMode() const;
 	void StartAutoReplayIfRequested();
+	void StartUiCaptureIfRequested();
+	// Non-empty while the dev-only UI capture is active; one screenshot request per tick.
+	FString UiCaptureDir;
+	int32 UiCaptureFrame = 0;
 };

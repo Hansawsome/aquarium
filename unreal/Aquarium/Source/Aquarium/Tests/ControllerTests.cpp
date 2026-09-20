@@ -37,4 +37,23 @@ bool FControllerAutoReplay::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FControllerUiCaptureDir, "Aquarium.Controller.ParsesUiCaptureDir",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FControllerUiCaptureDir::RunTest(const FString&)
+{
+	FString Dir;
+	TestTrue(TEXT("parses"), ADiverPlayerController::ParseUiCaptureDir(TEXT("-benchmark -AquariumCaptureUI=/tmp/ui frames -seconds=14"), Dir));
+	TestEqual(TEXT("dir"), Dir, FString(TEXT("/tmp/ui")));
+
+	TestTrue(TEXT("quoted path with space"), ADiverPlayerController::ParseUiCaptureDir(TEXT("-AquariumCaptureUI=\"/a b/frames\""), Dir));
+	TestEqual(TEXT("quoted dir"), Dir, FString(TEXT("/a b/frames")));
+
+	TestFalse(TEXT("absent"), ADiverPlayerController::ParseUiCaptureDir(TEXT("-AquariumAutoNickname=x"), Dir));
+	TestTrue(TEXT("cleared"), Dir.IsEmpty());
+	TestFalse(TEXT("empty value"), ADiverPlayerController::ParseUiCaptureDir(TEXT("-AquariumCaptureUI="), Dir));
+	TestFalse(TEXT("null"), ADiverPlayerController::ParseUiCaptureDir(nullptr, Dir));
+	return true;
+}
+
 #endif

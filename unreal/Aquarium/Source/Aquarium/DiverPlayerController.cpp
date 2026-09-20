@@ -4,9 +4,11 @@
 #include "Components/InputComponent.h"
 #include "HudWidget.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/FileManager.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "TimerManager.h"
+#include "UnrealClient.h"
 
 namespace
 {
@@ -21,6 +23,8 @@ ADiverPlayerController::ADiverPlayerController()
 	// Prevent Possess/RestartPlayer from snapping the view back to the pawn; the fixed
 	// DiverCamera view target set below must stick for the whole session (P-06).
 	bAutoManageActiveCameraTarget = false;
+	// Tick only does work while the dev-only UI capture is active (see StartUiCaptureIfRequested).
+	PrimaryActorTick.bCanEverTick = true;
 }
 
 void ADiverPlayerController::BeginPlay()
@@ -52,6 +56,23 @@ void ADiverPlayerController::BeginPlay()
 	Hud->AddToViewport(kHudZOrder);
 	ShowEntry();
 	StartAutoReplayIfRequested();
+	StartUiCaptureIfRequested();
+}
+
+void ADiverPlayerController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+#if !UE_BUILD_SHIPPING
+	// One UI-inclusive screenshot per tick: with -benchmark -fps=N the timestep is fixed, so the
+	// frame index maps to N frames per second. -dumpmovie cannot be used for this because the
+	// viewport client forces bShowUI=false while dumping a movie.
+	if (!UiCaptureDir.IsEmpty() && !FScreenshotRequest::IsScreenshotRequested())
+	{
+		FScreenshotRequest::RequestScreenshot(
+			FString::Printf(TEXT("%s/UiFrame%05d.png"), *UiCaptureDir, UiCaptureFrame++),
+			/*bShowUI*/ true, /*bAddFilenameSuffix*/ false);
+	}
+#endif
 }
 
 void ADiverPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -202,5 +223,34 @@ void ADiverPlayerController::StartAutoReplayIfRequested()
 	{
 		Timers.SetTimer(AutoExitTimer, this, &ADiverPlayerController::RequestExit, kAutoSubmitDelay + ExitAfter, false);
 	}
+#endif
+}
+
+bool ADiverPlayerController::ParseUiCaptureDir(const TCHAR* CmdLine, FString& OutDir)
+{
+	OutDir.Reset();
+	if (!CmdLine || !FParse::Value(CmdLine, TEXT("-AquariumCaptureUI="), OutDir))
+	{
+		return false;
+	}
+	OutDir.TrimStartAndEndInline();
+	return !OutDir.IsEmpty();
+}
+
+void ADiverPlayerController::StartUiCaptureIfRequested()
+{
+#if !UE_BUILD_SHIPPING
+	FString Dir;
+	if (!ParseUiCaptureDir(FCommandLine::Get(), Dir))
+	{
+		return;
+	}
+	if (!IFileManager::Get().MakeDirectory(*Dir, /*Tree*/ true))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AquariumCaptureUI: cannot create %s"), *Dir);
+		return;
+	}
+	UiCaptureDir = Dir;
+	UiCaptureFrame = 0;
 #endif
 }
