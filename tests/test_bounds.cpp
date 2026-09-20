@@ -53,6 +53,18 @@ TEST_CASE("steer along boundary does not block inward movement") {
     Vec2 d = SteerAlongBoundary({95.f, 50.f}, Vec2{-1.f, 0.f}, kArea, 10.f);
     REQUIRE(d.x == Approx(-1.f));
 }
+TEST_CASE("steer along boundary turns aside when heading straight at a wall") {
+    // The common case: a fish swimming dead-on into a wall. Dropping the outward component
+    // would leave a zero direction (the stall this function exists to remove), so the
+    // direction turns along the wall toward the area centre at full magnitude.
+    Vec2 d = SteerAlongBoundary({95.f, 30.f}, Vec2{1.f, 0.f}, kArea, 10.f);
+    REQUIRE(d.x == 0.f);
+    REQUIRE(d.y == Approx(1.f));          // centre is at y = 50, so it heads up the wall
+    REQUIRE(d.Length() == Approx(1.f));
+    Vec2 e = SteerAlongBoundary({95.f, 70.f}, Vec2{1.f, 0.f}, kArea, 10.f);
+    REQUIRE(e.y == Approx(-1.f));         // below the centre in y: heads down the wall
+}
+
 TEST_CASE("steer along boundary passes a zero direction through") {
     Vec2 d = SteerAlongBoundary({95.f, 95.f}, Vec2{0.f, 0.f}, kArea, 10.f);
     REQUIRE(d.Length() == 0.f);
