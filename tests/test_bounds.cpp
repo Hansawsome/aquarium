@@ -35,3 +35,25 @@ TEST_CASE("clamp forces position inside area") {
     REQUIRE(p.x == Approx(100.f));
     REQUIRE(p.y == Approx(0.f));
 }
+
+TEST_CASE("steer along boundary keeps direction in open water") {
+    Vec2 d = SteerAlongBoundary({50.f, 50.f}, Vec2{1.f, 0.f}, kArea, 10.f);
+    REQUIRE(d.x == Approx(1.f)); REQUIRE(d.y == Approx(0.f));
+}
+TEST_CASE("steer along boundary slides along a wall at full magnitude") {
+    const Vec2 In = Vec2{1.f, 1.f}.Normalized();
+    Vec2 d = SteerAlongBoundary({95.f, 50.f}, In, kArea, 10.f);
+    REQUIRE(d.x == 0.f); REQUIRE(d.y == Approx(1.f)); REQUIRE(d.Length() == Approx(1.f));
+}
+TEST_CASE("steer along boundary turns inward in a corner") {
+    Vec2 d = SteerAlongBoundary({95.f, 95.f}, Vec2{1.f, 1.f}.Normalized(), kArea, 10.f);
+    REQUIRE(d.x < 0.f); REQUIRE(d.y < 0.f); REQUIRE(d.Length() == Approx(1.f));
+}
+TEST_CASE("steer along boundary does not block inward movement") {
+    Vec2 d = SteerAlongBoundary({95.f, 50.f}, Vec2{-1.f, 0.f}, kArea, 10.f);
+    REQUIRE(d.x == Approx(-1.f));
+}
+TEST_CASE("steer along boundary passes a zero direction through") {
+    Vec2 d = SteerAlongBoundary({95.f, 95.f}, Vec2{0.f, 0.f}, kArea, 10.f);
+    REQUIRE(d.Length() == 0.f);
+}
