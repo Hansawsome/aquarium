@@ -83,6 +83,8 @@ EBeginSessionResult AAquariumGameMode::BeginSession(const FString& RawNickname)
 		UE_LOG(LogTemp, Warning, TEXT("AquariumGameMode: player fish spawn failed; session not started"));
 		return EBeginSessionResult::EmptyCatalog;
 	}
+	// Name tag (F-04): the nickname goes straight from memory into the widget; never log it.
+	PlayerFishActor->AttachNameTag(FText::FromString(CurrentNickname()));
 	return EBeginSessionResult::Ok;
 }
 

@@ -13,6 +13,8 @@
 
 #include "FishActor.generated.h"
 
+class UNameTagComponent;
+
 // A fish driven entirely by the engine-independent rules layer. The actor only maps
 // 2D swim-plane state to world transforms and bone rotations.
 UCLASS()
@@ -54,11 +56,15 @@ public:
 	FVector BoneLocation(FName Bone);
 	FTransform BoneTransform(FName Bone);
 
+	// Attaches a screen-space name tag above the body (F-04). Intended for the player fish only.
+	UNameTagComponent* AttachNameTag(const FText& Name);
+
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UPoseableMeshComponent> Body = nullptr;
+	UPROPERTY() TObjectPtr<UNameTagComponent> NameTag = nullptr;
 
 	aquarium::SwimPlane Plane;
 	aquarium::Rect Area;

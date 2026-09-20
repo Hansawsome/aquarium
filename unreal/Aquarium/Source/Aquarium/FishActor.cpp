@@ -1,5 +1,7 @@
 #include "FishActor.h"
 
+#include "NameTagComponent.h"
+
 #include "Engine/SkeletalMesh.h"
 #include "ReferenceSkeleton.h"
 
@@ -170,6 +172,18 @@ FVector AFishActor::BoneLocation(FName Bone)
 FTransform AFishActor::BoneTransform(FName Bone)
 {
 	return Body->GetBoneTransformByName(Bone, EBoneSpaces::ComponentSpace);
+}
+
+UNameTagComponent* AFishActor::AttachNameTag(const FText& Name)
+{
+	if (NameTag == nullptr)
+	{
+		NameTag = NewObject<UNameTagComponent>(this, TEXT("NameTag"));
+		NameTag->SetupAttachment(Body);
+		NameTag->RegisterComponent();
+	}
+	NameTag->SetDisplayedName(Name);
+	return NameTag;
 }
 
 void AFishActor::BeginPlay()
