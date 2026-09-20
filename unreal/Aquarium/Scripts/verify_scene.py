@@ -8,6 +8,16 @@ import unreal
 MAP = "/Game/Maps/ReefM1"
 SAND_MATERIAL = "/Game/Env/M_Sand"
 
+# Must mirror the tuning block in build_reef_m1.py.
+SCHOOL_COUNT = 36
+SCHOOL_SPECIES_MIN = 5
+SCHOOL_SCALE = (0.75, 1.3)
+PROP_COUNT = 14
+PROP_CLEAR_RADIUS_Y = 60.0
+PROP_CLEAR_X = 320.0
+PROP_MESH_NAMES = {"SM_BranchCoral", "SM_PlateCoral", "SM_BrainCoral",
+                   "SM_boulder_01", "SM_rock_07", "SM_rock_09"}
+
 les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 ues = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
@@ -21,7 +31,8 @@ for a in actors:
     by_class.setdefault(a.get_class().get_name(), []).append(a)
 
 need = {"CameraActor": 1, "DirectionalLight": 1, "SkyLight": 1,
-        "ExponentialHeightFog": 1, "StaticMeshActor": 1, "FishActor": 2}
+        "ExponentialHeightFog": 1, "StaticMeshActor": 1 + PROP_COUNT,
+        "FishActor": SCHOOL_COUNT}
 missing = [k for k, n in need.items() if len(by_class.get(k, [])) < n]
 assert not missing, "missing actors: %s" % missing
 
@@ -45,10 +56,11 @@ fog = by_class["ExponentialHeightFog"][0].get_editor_property("component")
 assert fog.get_editor_property("fog_density") >= 2.0, "fog too thin for underwater look (density < 2.0)"
 assert fog.get_editor_property("enable_volumetric_fog"), "volumetric fog disabled (no light shafts)"
 
-# Background fish: exactly two, one per species, none flagged as the player's,
-# all behind the player lane (game mode spawns the player fish at X = 220).
+# Background school: the full seeded count, several species, none flagged as the
+# player's, all behind the player lane (game mode spawns the player at X = 220).
 fishes = by_class["FishActor"]
-assert len(fishes) == 2, "expected exactly 2 background FishActors, got %d" % len(fishes)
+assert len(fishes) == SCHOOL_COUNT, \
+    "expected exactly %d background FishActors, got %d" % (SCHOOL_COUNT, len(fishes))
 mesh_names = set()
 for fish in fishes:
     label = fish.get_actor_label()
@@ -63,15 +75,38 @@ for fish in fishes:
     assert ox >= 330.0, "%s plane_origin.x=%.1f < 330 (must sit behind the player lane)" % (label, ox)
     ax = fish.get_actor_location().x
     assert ax >= 300.0, "%s actor at x=%.1f < 300 (player lane must be free)" % (label, ax)
-assert mesh_names == {"SK_BlueTang", "SK_Clownfish"}, "unexpected fish meshes: %s" % sorted(mesh_names)
+    s = fish.get_actor_scale3d()
+    for axis, v in (("x", s.x), ("y", s.y), ("z", s.z)):
+        assert SCHOOL_SCALE[0] - 1e-3 <= v <= SCHOOL_SCALE[1] + 1e-3, \
+            "%s scale.%s=%.3f outside %s" % (label, axis, v, SCHOOL_SCALE)
+assert len(mesh_names) >= SCHOOL_SPECIES_MIN, \
+    "expected at least %d distinct fish meshes, got %s" % (SCHOOL_SPECIES_MIN, sorted(mesh_names))
 
 # Floor: engine plane with the sand material
-floor = by_class["StaticMeshActor"][0]
+smas = by_class["StaticMeshActor"]
+floors = [a for a in smas if a.get_actor_label() == "SandFloor"]
+assert len(floors) == 1, "expected exactly one SandFloor, got %d" % len(floors)
+floor = floors[0]
 smc = floor.static_mesh_component
 assert smc.static_mesh is not None, "floor has no static mesh"
 floor_mat = smc.get_material(0)
 assert floor_mat is not None, "floor has no material"
 assert floor_mat.get_path_name().startswith(SAND_MATERIAL), "floor material is not M_Sand: %s" % floor_mat.get_path_name()
+
+# Reef props: every other StaticMeshActor. Known meshes, clear of the camera lane.
+props = [a for a in smas if a is not floor]
+assert len(props) == PROP_COUNT, "expected %d reef props, got %d" % (PROP_COUNT, len(props))
+prop_mesh_names = set()
+for prop in props:
+    label = prop.get_actor_label()
+    mesh = prop.static_mesh_component.static_mesh
+    assert mesh is not None, "%s has no static mesh" % label
+    mesh_name = mesh.get_path_name().rsplit("/", 1)[-1].split(".")[-1]
+    assert mesh_name in PROP_MESH_NAMES, "%s uses unexpected mesh %s" % (label, mesh_name)
+    prop_mesh_names.add(mesh_name)
+    loc = prop.get_actor_location()
+    assert not (abs(loc.y) < PROP_CLEAR_RADIUS_Y and loc.x < PROP_CLEAR_X), \
+        "%s at (%.1f, %.1f) blocks the camera lane" % (label, loc.x, loc.y)
 
 # World settings: no per-map game mode override (project default AAquariumGameMode applies)
 world = ues.get_editor_world()
@@ -79,4 +114,5 @@ ws_list = unreal.GameplayStatics.get_all_actors_of_class(world, unreal.WorldSett
 assert len(ws_list) == 1, "expected exactly one WorldSettings, got %d" % len(ws_list)
 assert ws_list[0].get_editor_property("default_game_mode") is None, "map overrides the default game mode"
 
-print("SCENE_OK actors=%d fish=%d classes=%s" % (len(actors), len(fishes), sorted(by_class.keys())))
+print("SCENE_OK actors=%d fish=%d props=%d species=%d"
+      % (len(actors), len(fishes), len(props), len(mesh_names)))

@@ -1,7 +1,8 @@
 # Builds the ReefM1 underwater scene from scratch: sand textures + M_Sand,
 # a procedural caustics light function (M_Caustics), and the level itself
 # (sand floor, sun with caustics, sky light, dense blue-teal height fog with
-# volumetric light shafts, the DiverCamera and two background FishActors).
+# volumetric light shafts, the DiverCamera, a seeded background fish school and
+# a seeded scatter of reef props).
 # Idempotent: re-running replaces every asset in place (no *_1 duplicates).
 #
 # Run headless:
@@ -9,6 +10,7 @@
 import glob
 import math
 import os
+import random
 import unreal
 
 ROOT = os.path.abspath(os.path.join(unreal.Paths.project_dir(), "..", ".."))
@@ -28,14 +30,43 @@ ENGINE_SKY_CUBEMAP = "/Engine/MapTemplates/Sky/DaylightAmbientCubemap"
 CAM_LOC = (0.0, 0.0, 130.0)
 CAM_ROT = (-4.0, 0.0)                   # pitch, yaw
 CAM_FOV = 75.0
-# Background fish (label, mesh path, seed, origin, half_w, half_h). All at X >= 330 so the player's
-# fish (spawned by the game mode at X = 220) is nearer the camera and reads larger.
-# Planes are ~4 x 2 m: at 3.3 m the 75 deg FOV only spans ~4.9 m, so a wider
-# plane would let a fish wander out of frame.
-BACKGROUND_FISH = [
-    ("BlueTang_BG",  "/Game/Fish/BlueTang/SK_BlueTang",   7,  (380.0, -60.0, 115.0), 220.0, 105.0),
-    ("Clownfish_BG", "/Game/Fish/Clownfish/SK_Clownfish", 11, (330.0,  70.0, 100.0), 200.0,  95.0),
+# Background school: generated from a fixed seed so the layout is reproducible.
+# All fish sit at X >= 330 so the player's fish (spawned by the game mode at
+# X = 220) is nearer the camera and reads larger.
+SCHOOL_SEED = 20260920
+SCHOOL_COUNT = 36
+# (mesh path, weight) — the small damselfish fills the background
+SCHOOL_SPECIES = [
+    ("/Game/Fish/Damselfish/SK_Damselfish",       0.40),
+    ("/Game/Fish/BlueTang/SK_BlueTang",           0.15),
+    ("/Game/Fish/Clownfish/SK_Clownfish",         0.15),
+    ("/Game/Fish/YellowTang/SK_YellowTang",       0.15),
+    ("/Game/Fish/Butterflyfish/SK_Butterflyfish", 0.15),
 ]
+SCHOOL_X = (330.0, 700.0)      # behind the player's plane at X = 220
+SCHOOL_Y = (-250.0, 250.0)
+SCHOOL_Z = (110.0, 200.0)
+SCHOOL_HALF_W = (120.0, 220.0)
+SCHOOL_HALF_H = (40.0, 60.0)
+SCHOOL_SCALE = (0.75, 1.3)
+SCHOOL_SPEED = (25.0, 55.0)
+
+PROP_SEED = 77
+PROP_COUNT = 14
+# (mesh path, scale range) — rock_09 is a 15 cm pebble, so it is scaled up a lot
+PROP_MESHES = [
+    ("/Game/Props/SM_BranchCoral", (0.7, 1.4)),
+    ("/Game/Props/SM_PlateCoral",  (0.6, 1.2)),
+    ("/Game/Props/SM_BrainCoral",  (0.7, 1.4)),
+    ("/Game/Props/SM_boulder_01",  (0.8, 1.5)),
+    ("/Game/Props/SM_rock_07",     (2.0, 4.0)),
+    ("/Game/Props/SM_rock_09",     (4.0, 8.0)),
+]
+PROP_X = (150.0, 800.0)
+PROP_Y = (-400.0, 400.0)
+PROP_CLEAR_RADIUS_Y = 60.0     # keep the camera's forward lane clear of props
+PROP_CLEAR_X = 320.0
+
 FISH_EDITOR_YAW = 90.0                  # side-on in editor stills; runtime facing follows velocity
 
 FLOOR_Z = 1.0                           # above the editor grid (z=0) so captures do not z-fight
@@ -314,7 +345,20 @@ cam.camera_component.set_field_of_view(CAM_FOV)
 
 fish_cls = unreal.load_class(None, FISH_CLASS)
 assert fish_cls is not None, "FishActor class not found (is the C++ module built?)"
-for label, mesh_path, seed, origin, half_w, half_h in BACKGROUND_FISH:
+rng = random.Random(SCHOOL_SEED)
+species_paths = [p for p, _ in SCHOOL_SPECIES]
+species_weights = [w for _, w in SCHOOL_SPECIES]
+fish_count = 0
+for i in range(SCHOOL_COUNT):
+    mesh_path = rng.choices(species_paths, weights=species_weights, k=1)[0]
+    origin = (rng.uniform(*SCHOOL_X), rng.uniform(*SCHOOL_Y), rng.uniform(*SCHOOL_Z))
+    half_w = rng.uniform(*SCHOOL_HALF_W)
+    half_h = rng.uniform(*SCHOOL_HALF_H)
+    scale = rng.uniform(*SCHOOL_SCALE)
+    speed = rng.uniform(*SCHOOL_SPEED)
+    seed = rng.randrange(1, 100000)
+    name = mesh_path.rsplit("/", 1)[-1]
+    label = "Fish_%02d_%s" % (i, name)
     fish = spawn(fish_cls, origin, (0.0, FISH_EDITOR_YAW), label=label)
     sk = unreal.load_asset(mesh_path)
     assert isinstance(sk, unreal.SkeletalMesh), "fish mesh missing: %s" % mesh_path
@@ -323,12 +367,40 @@ for label, mesh_path, seed, origin, half_w, half_h in BACKGROUND_FISH:
     fish.set_editor_property("seed", seed)
     fish.set_editor_property("plane_half_width", half_w)
     fish.set_editor_property("plane_half_height", half_h)
+    fish.set_editor_property("max_speed", speed)
+    fish.set_actor_scale3d(unreal.Vector(scale, scale, scale))
     # The actor applies FishMesh to its body only at BeginPlay; push it now so the
     # fish is visible in the editor / review captures too.
     body = fish.get_component_by_class(unreal.PoseableMeshComponent)
     assert body is not None, "%s has no PoseableMeshComponent" % label
     body.set_skinned_asset_and_update(sk)
     body.set_visibility(True)
+    fish_count += 1
+
+# Props: scattered static meshes on the sand floor, seeded separately so
+# changing the school does not reshuffle the reef.
+prng = random.Random(PROP_SEED)
+prop_count = 0
+for i in range(PROP_COUNT):
+    mesh_path, scale_range = prng.choice(PROP_MESHES)
+    x = prng.uniform(*PROP_X)
+    y = prng.uniform(*PROP_Y)
+    # Keep the camera's forward lane clear: push offenders sideways, same sign.
+    if abs(y) < PROP_CLEAR_RADIUS_Y and x < PROP_CLEAR_X:
+        y = math.copysign(PROP_CLEAR_RADIUS_Y, y if y != 0.0 else 1.0)
+    yaw = prng.uniform(0.0, 360.0)
+    scale = prng.uniform(*scale_range)
+    name = mesh_path.rsplit("/", 1)[-1]
+    prop = spawn(unreal.StaticMeshActor, (x, y, FLOOR_Z), (0.0, yaw),
+                 label="Prop_%02d_%s" % (i, name))
+    pc = prop.static_mesh_component
+    pc.set_mobility(unreal.ComponentMobility.STATIC)
+    sm = unreal.load_asset(mesh_path)
+    assert isinstance(sm, unreal.StaticMesh), "prop mesh missing: %s" % mesh_path
+    assert pc.set_static_mesh(sm), "failed to set prop mesh: %s" % mesh_path
+    prop.set_actor_scale3d(unreal.Vector(scale, scale, scale))
+    prop_count += 1
 
 assert les.save_current_level(), "save_current_level failed"
-print("REEF_OK actors=%d map=%s" % (len(eas.get_all_level_actors()), MAP))
+print("REEF_OK actors=%d fish=%d props=%d map=%s"
+      % (len(eas.get_all_level_actors()), fish_count, prop_count, MAP))
