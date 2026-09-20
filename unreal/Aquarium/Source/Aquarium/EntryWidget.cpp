@@ -18,6 +18,26 @@
 
 #define LOCTEXT_NAMESPACE "Aquarium"
 
+namespace
+{
+	constexpr int32 kTitleFontSize = 36;
+	constexpr int32 kBodyFontSize = 28;
+	constexpr int32 kErrorFontSize = 26;
+	constexpr int32 kErrorOutlineSize = 1;
+	constexpr float kMinInputWidth = 420.f;
+	constexpr float kPanelPadding = 32.f;
+	constexpr float kTitleBottomPadding = 16.f;
+	constexpr float kInputBottomPadding = 12.f;
+	constexpr float kErrorTopPadding = 12.f;
+	const FMargin kButtonLabelPadding(48.f, 8.f);
+	const FLinearColor kPanelTint(0.f, 0.f, 0.f, 0.6f);
+	const FLinearColor kTitleTint = FLinearColor::White;
+	const FLinearColor kButtonTint(0.98f, 0.9f, 0.7f);
+	const FLinearColor kButtonLabelTint(0.05f, 0.05f, 0.08f);
+	const FLinearColor kErrorTint(1.f, 0.85f, 0.3f);
+	const FLinearColor kErrorOutlineTint(0.f, 0.f, 0.f, 0.8f);
+}
+
 EEntryError UEntryWidget::ClassifyNickname(const FString& Raw)
 {
 	const aquarium::NicknameResult Result = aquarium::ValidateNickname(std::string(TCHAR_TO_UTF8(*Raw)));
@@ -66,10 +86,31 @@ void UEntryWidget::ResetForEntry()
 		ErrorText->SetText(FText::GetEmpty());
 	}
 	SetSubmitting(false);
-	if (Input)
+}
+
+void UEntryWidget::FocusInput()
+{
+	if (Input && IsVisible())
 	{
 		Input->SetKeyboardFocus();
 	}
+}
+
+TSharedRef<SWidget> UEntryWidget::GetInputSlateWidget()
+{
+	// TakeWidget on the user widget guarantees the tree (and Input) exists.
+	TakeWidget();
+	return Input ? Input->TakeWidget() : SNullWidget::NullWidget;
+}
+
+FReply UEntryWidget::NativeOnFocusReceived(const FGeometry& InGeometry, const FFocusEvent& InFocusEvent)
+{
+	Super::NativeOnFocusReceived(InGeometry, InFocusEvent);
+	if (Input)
+	{
+		return FReply::Handled().SetUserFocus(Input->TakeWidget(), InFocusEvent.GetCause());
+	}
+	return FReply::Handled();
 }
 
 void UEntryWidget::SetSubmitting(bool bBusy)
@@ -119,13 +160,15 @@ TSharedRef<SWidget> UEntryWidget::RebuildWidget()
 {
 	if (WidgetTree && WidgetTree->RootWidget == nullptr)
 	{
+		SetIsFocusable(true);
+
 		UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Root"));
 		WidgetTree->RootWidget = Root;
 
 		// Dark translucent panel so the text stays legible over the underwater scene.
 		UBorder* Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Panel"));
-		Panel->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.45f));
-		Panel->SetPadding(FMargin(32.f));
+		Panel->SetBrushColor(kPanelTint);
+		Panel->SetPadding(FMargin(kPanelPadding));
 		if (UCanvasPanelSlot* PanelSlot = Root->AddChildToCanvas(Panel))
 		{
 			PanelSlot->SetAnchors(FAnchors(0.5f, 0.5f));
@@ -137,41 +180,44 @@ TSharedRef<SWidget> UEntryWidget::RebuildWidget()
 		Panel->SetContent(Column);
 
 		UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Title"));
-		Title->SetFont(FUiFont::Get(36));
-		Title->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Title->SetFont(FUiFont::Get(kTitleFontSize));
+		Title->SetColorAndOpacity(FSlateColor(kTitleTint));
 		Title->SetJustification(ETextJustify::Center);
 		Title->SetText(LOCTEXT("EntryTitle", "별명을 정하고 바다로 들어가요"));
 		if (UVerticalBoxSlot* TitleSlot = Column->AddChildToVerticalBox(Title))
 		{
 			TitleSlot->SetHorizontalAlignment(HAlign_Center);
-			TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
+			TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, kTitleBottomPadding));
 		}
 
 		Input = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Input"));
 		{
 			// UE 5.8 has no UEditableTextBox::SetFont; the font lives in the widget style's text style.
 			FEditableTextBoxStyle Style = Input->GetWidgetStyle();
-			Style.SetFont(FUiFont::Get(28));
+			Style.SetFont(FUiFont::Get(kBodyFontSize));
 			Input->SetWidgetStyle(Style);
 		}
 		Input->SetHintText(LOCTEXT("EntryHint", "별명을 입력하세요 (12자까지)"));
-		Input->SetMinDesiredWidth(420.f);
+		Input->SetMinDesiredWidth(kMinInputWidth);
 		Input->OnTextCommitted.AddDynamic(this, &UEntryWidget::HandleTextCommitted);
 		if (UVerticalBoxSlot* InputSlot = Column->AddChildToVerticalBox(Input))
 		{
 			InputSlot->SetHorizontalAlignment(HAlign_Center);
-			InputSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
+			InputSlot->SetPadding(FMargin(0.f, 0.f, 0.f, kInputBottomPadding));
 		}
 
 		EnterButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("EnterButton"));
 		EnterButton->OnClicked.AddDynamic(this, &UEntryWidget::HandleEnterClicked);
+		// Explicit light button / dark label so contrast holds regardless of the default brush.
+		EnterButton->SetBackgroundColor(kButtonTint);
 		UTextBlock* EnterLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("EnterLabel"));
-		EnterLabel->SetFont(FUiFont::Get(28));
+		EnterLabel->SetFont(FUiFont::Get(kBodyFontSize));
+		EnterLabel->SetColorAndOpacity(FSlateColor(kButtonLabelTint));
 		EnterLabel->SetJustification(ETextJustify::Center);
 		EnterLabel->SetText(LOCTEXT("EntryEnter", "입장"));
 		if (UButtonSlot* LabelSlot = Cast<UButtonSlot>(EnterButton->AddChild(EnterLabel)))
 		{
-			LabelSlot->SetPadding(FMargin(48.f, 8.f));
+			LabelSlot->SetPadding(kButtonLabelPadding);
 		}
 		if (UVerticalBoxSlot* ButtonSlot = Column->AddChildToVerticalBox(EnterButton))
 		{
@@ -179,13 +225,17 @@ TSharedRef<SWidget> UEntryWidget::RebuildWidget()
 		}
 
 		ErrorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ErrorText"));
-		ErrorText->SetFont(FUiFont::Get(22));
-		ErrorText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.3f)));
+		{
+			FSlateFontInfo ErrorFont = FUiFont::Get(kErrorFontSize);
+			ErrorFont.OutlineSettings = FFontOutlineSettings(kErrorOutlineSize, kErrorOutlineTint);
+			ErrorText->SetFont(ErrorFont);
+		}
+		ErrorText->SetColorAndOpacity(FSlateColor(kErrorTint));
 		ErrorText->SetJustification(ETextJustify::Center);
 		if (UVerticalBoxSlot* ErrorSlot = Column->AddChildToVerticalBox(ErrorText))
 		{
 			ErrorSlot->SetHorizontalAlignment(HAlign_Center);
-			ErrorSlot->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));
+			ErrorSlot->SetPadding(FMargin(0.f, kErrorTopPadding, 0.f, 0.f));
 		}
 	}
 	return Super::RebuildWidget();

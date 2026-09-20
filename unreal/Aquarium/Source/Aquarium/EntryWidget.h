@@ -37,13 +37,20 @@ public:
 	static FText MessageFor(EEntryError Error);
 
 	void ShowError(EEntryError Error);
-	// Clears text and error, re-enables the button, focuses the box.
+	// Clears text and error and re-enables the button. Does not focus: the controller calls
+	// FocusInput() (or hands GetInputSlateWidget() to FInputModeUIOnly) after the widget is visible.
 	void ResetForEntry();
 	// Disables the button while a submit is in flight (F-02).
 	void SetSubmitting(bool bBusy);
+	// Gives keyboard focus to the text box; no-op while the widget is not visible.
+	void FocusInput();
+	// Slate widget of the text box, for FInputModeUIOnly::SetWidgetToFocus.
+	TSharedRef<SWidget> GetInputSlateWidget();
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+	// Focus on the root is forwarded to the text box.
+	virtual FReply NativeOnFocusReceived(const FGeometry& InGeometry, const FFocusEvent& InFocusEvent) override;
 
 private:
 	UPROPERTY() TObjectPtr<UEditableTextBox> Input = nullptr;
