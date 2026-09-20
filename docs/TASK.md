@@ -14,7 +14,7 @@
 - [x] 사용자 문서 검토 — 2026-09-19 엔진(Unreal 5 유지) 확정과 함께 승인
 - [x] 상세 TDD 구현 계획 작성과 실행 방식 선택 — `docs/superpowers/plans/2026-09-19-rules-layer.md`, executing-plans로 2026-09-20 실행
 
-## 구현 로드맵 — M2b 구현 완료(사용자 시각 검토 대기)
+## 구현 로드맵 — M3 구현 완료(사용자 시각 검토 대기)
 
 | 단계 | 작업 | 완료 조건 |
 |---|---|---|
@@ -22,7 +22,7 @@
 | M1 | 규칙 테스트 환경과 최소 수중 장면 | RED/GREEN 기록, 한 종 물고기 유영 영상, 사용자 시각 검토. **2026-09-20 구현 완료**: 규칙 60개 + Unreal Automation 9개 통과, `docs/reviews/2026-09-20-m1-swim.mp4`(34초, 1080p) 생성. **사용자 시각 검토(2026-09-20): 병합 승인, 코멘트 없음. 모델 품질 개선은 후속 반복** |
 | M2 | 별명 입력·세션·무작위 배정·이름표 | F-01~04 및 F-14 테스트, 한국어 패키지 입력 확인. **2026-09-20 구현 완료**: 규칙 60 + Unreal Automation 24 통과, 클라운피시 2종째, Noto Sans KR, `docs/reviews/2026-09-20-m2-flow.mp4`(13.5초) + 스틸 3장. **사용자 검토(2026-09-20): 승인. 실제 한글 IME 타이핑·입장·이름표·나가기 사용자 직접 확인 완료** |
 | M2b | 군집과 산호초 — 배경 물고기 30~40마리 무작위 유영(종·크기·시드 변화), 산호초·바위 배치 | **2026-09-20 구현 완료**: 5종 36마리 + 소품 14개(산호 3종 절차 생성, Poly Haven CC0 바위 3종), 규칙 60 + Unreal Automation 26 통과, 성능 평균 102.5 fps / p95 10.2 ms(1920×1080 에디터 빌드), `docs/reviews/2026-09-20-m2b-{reef.mp4,wide.png,school.png,perf.md}`. **사용자 시각 검토: 대기** |
-| M3 | 방향키·감속·경계·자동 유영 | F-05~08 테스트, 여러 화면 비율에서 이탈 없음. 후속: 규칙 계층 벽 조향(`AvoidBoundary`가 바깥 성분을 0으로 만들어 속도 반전 → M1은 액터 슬루로 완화, M1 계획서 후속 항목 참고) |
+| M3 | 방향키·감속·경계·자동 유영 | F-05~08 테스트, 여러 화면 비율에서 이탈 없음. **2026-09-21 구현 완료**: 규칙 66 + Unreal Automation 36 통과, 방향키 조종·포커스 상실 일시정지·속도 조절·화면 비율에 맞춘 유영 평면, `docs/reviews/2026-09-21-m3-control.mp4`(19.5초) + 스틸 2장(`-steer.png`, `-wall.png`). **사용자 시각 검토: 대기**. M1/M2b 후속 항목 "규칙 계층 벽 조향" 해소: 배경 물고기는 `SteerAlongBoundary`로 벽을 따라 미끄러져 속도 반전에 따른 방향 뒤집힘이 사라졌고, 플레이어 물고기는 `AvoidBoundary`로 벽에서 그대로 멈춘다(요청하지 않은 표류 금지). |
 | M4 | 실사 반복 (2026-09-20 신설) — 물고기 모델 정밀화(해부 비율·지느러미·눈·비늘 노멀맵·서브서피스), 산호·바위 텍스처, 조명·후처리 | 단계마다 사용자 검토 영상, 이전 대비 개선 여부 판정 |
 | M5 | 클릭 도망·회복·애니메이션 | F-09~13 테스트, 중복 입력·중심 적중·모서리 검증 |
 | M6 | macOS 시제품 품질과 배포 | SRS 성능 측정, 패키지 실행, 에셋 출처 확인 |
@@ -31,13 +31,15 @@ M0 진행(2026-09-20): Blender/CMake/Git LFS·Blender MCP 완료. Xcode 27.0 + U
 
 ## 검증 현황
 
-- 규칙 계층(C++17, Unreal 독립) 테스트: **60개 통과** — 2026-09-20, 브랜치 `feat/m1-scene`, 커밋 `e56d1fe` (`-Wall -Wextra -Wshadow` 경고 0). M1에서 SwimPlane, SwimAnimation(누적 위상), Heading 추가. 클린 빌드 `cmake -S . -B build && cmake --build build -j && ctest --test-dir build` 결과 `100% tests passed out of 60`. 각 태스크는 헤더 부재 컴파일 실패 → 스텁 assertion 실패(RED) → 구현 통과(GREEN) 순서로 진행했고 커밋 단위로 기록됨. 다룬 SRS 항목: F-01, F-02, F-03, F-05, F-06, F-07, F-08, F-10, F-11, F-12, F-14의 규칙 부분.
-- Unreal Automation 테스트: **26개 Success** (`Automation RunTests Aquarium`, 헤드리스 `-nullrhi`): 규칙 링크 1, `AFishActor` 8(규칙 계층 구동·dt=0·결정성·본 존재·연쇄 본 변환·방향 연속성·본 각도 연속성·바로 선 자세), 게임 모드 1, 세션 5(F-02/F-03/F-14), 이름표 2(F-04·한글 글리프), UI 3(F-01 문구·분류·이중 제출 방어), 컨트롤러 5(결과→오류 매핑, 개발 옵션 4종 파싱), 세션에 플레이어 물고기 크기 정규화 1. F-13의 "순간 반전 없음"은 `FacingIsContinuous`/`BoneAnglesAreContinuous`/`UpVectorStaysUpright`로 고정.
+- 규칙 계층(C++17, Unreal 독립) 테스트: **66개 통과** — 2026-09-21, 브랜치 `feat/m3-arrow-control` (최초 60개는 2026-09-20 `feat/m1-scene` `e56d1fe`) (`-Wall -Wextra -Wshadow` 경고 0). M1에서 SwimPlane, SwimAnimation(누적 위상), Heading 추가. 클린 빌드 `cmake -S . -B build && cmake --build build -j && ctest --test-dir build` 결과 `100% tests passed out of 66`. 각 태스크는 헤더 부재 컴파일 실패 → 스텁 assertion 실패(RED) → 구현 통과(GREEN) 순서로 진행했고 커밋 단위로 기록됨. 다룬 SRS 항목: F-01, F-02, F-03, F-05, F-06, F-07, F-08, F-10, F-11, F-12, F-14의 규칙 부분.
+- Unreal Automation 테스트: **36개 Success** (`Automation RunTests Aquarium`, 헤드리스 `-nullrhi`): 규칙 링크 1, `AFishActor` 12(규칙 계층 구동·dt=0·결정성·본 존재·연쇄 본 변환·방향 연속성·본 각도 연속성·바로 선 자세·일시정지·플레이어 입력 추종·배경은 입력 무시·플레이어는 벽에서 표류 없이 정지), 게임 모드 1, 세션 9(F-02/F-03/F-14, 플레이어 물고기 크기 정규화·조종 가능·화면 비율 평면 적합·요청 기준 재적합), 이름표 3(F-04·한글 글리프·스케일 분리), UI 3(F-01 문구·분류·이중 제출 방어), 컨트롤러 7(결과→오류 매핑, 방향키 매핑, 개발 옵션 5종 파싱). F-13의 "순간 반전 없음"은 `FacingIsContinuous`/`BoneAnglesAreContinuous`/`UpVectorStaysUpright`로 고정.
+- 시각 검토(M3): `docs/reviews/2026-09-21-m3-{control.mp4,steer.png,wall.png}` — 개발 전용 옵션(`-AquariumAutoInput`, `-AquariumAutoNickname`, `-AquariumAssignmentSeed`, `-AquariumCaptureUI`)으로 `scripts/render_m3_video.sh`가 재현한다. 제작자 확인: 네 방향 조종, 키를 놓으면 부드러운 감속, 벽에 붙였을 때 세로 표류 없음, 이름표는 계속 머리 위. **사용자 시각 검토: 대기**. 알려진 품질 한계: 벽을 따라 붙어 있을 때 자세가 가파르게 서는 순간이 있다.
 - 시각 검토(M2): `docs/reviews/2026-09-20-m2-{flow.mp4,entry.png,nametag.png,after-exit.png}` — 개발 전용 옵션(`-AquariumAutoNickname`, `-AquariumAutoExitAfter`, `-AquariumAssignmentSeed`, `-AquariumCaptureUI`)으로 재현. 제작자 확인: 한글 입장 화면, 앞쪽 큰 플레이어 물고기 위 이름표 추적, HUD 나가기, 퇴장 후 복귀. **사용자 검토 결과(2026-09-20): 승인, 한글 IME 직접 확인.** 알려진 품질 한계: 수직으로 방향을 바꿀 때 짧은 롤(0.3초), 가까운 블루탱의 짙은 남색 텍스처.
 - 시각 검토(M1): `docs/reviews/2026-09-20-m1-still.png`, `docs/reviews/2026-09-20-m1-swim.mp4`. 제작자 자체 확인: 수중 안개·빛줄기·바닥 코스틱·모래·블루탱 유영이 보이고 영상 내 순간이동·반전 없음. **사용자 검토 결과(2026-09-20): 병합 승인, 코멘트 없음.** 알려진 품질 한계: 물고기 모델은 1차 실루엣(실사 아님), 빛줄기 약함, 검은 옆줄무늬가 거리 때문에 잘 안 보임.
-- 미구현 Unreal 연동: F-09 레이캐스트(M4), 방향키 입력·포커스(M3).
+- 미구현 Unreal 연동: F-09 레이캐스트(M5).
+- F-06(포커스 상실 일시정지)은 `SetPaused` 계열 테스트로 로직을 고정했지만, 실제 윈도 포커스 델리게이트는 헤드리스에서 발생하지 않는다. 창 모드로 한 번 수동 확인(다른 앱으로 전환했다가 돌아오기)이 필요하다.
 - 성능 측정: **2026-09-20 1차 측정** — 물고기 36 + 소품 14, 1920×1080, 에디터 빌드에서 평균 102.5 fps / p95 10.22 ms (SRS 목표 60 fps·22 ms). 패키징 빌드 기준 판정은 M6.
 - 내 물고기는 카메라에 가장 가까운 평면(X=220)에 두고 종에 상관없이 몸길이 34 cm로 정규화해 화면에서 가장 크게 보인다(사용자 요청, 2026-09-20).
 - Unreal 빌드: 에디터·게임 타깃 컴파일 성공, 헤드리스 에디터 실행 성공 (2026-09-20, SETUP.md). 화면·성능: 미실행.
 - 무료 에셋: Poly Haven `coast_sand_01` (CC0) 도입, `docs/ASSETS.md`에 출처 기록. 물고기·텍스처는 직접 제작.
-- 현재 완료 범위: 설계 문서, 개발 도구·MCP 연결(M0), 규칙 계층, M1 수중 장면(사용자 승인), M2 세션·이름표(사용자 승인), M2b 군집·산호초(사용자 검토 대기).
+- 현재 완료 범위: 설계 문서, 개발 도구·MCP 연결(M0), 규칙 계층, M1 수중 장면(사용자 승인), M2 세션·이름표(사용자 승인), M2b 군집·산호초(사용자 검토 대기), M3 방향키 조종(사용자 검토 대기).

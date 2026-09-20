@@ -1,6 +1,6 @@
 # macOS 개발 도구와 MCP 연결
 
-상태 기준: 2026-09-20. 규칙 계층·Unreal 프로젝트·M1/M2 장면과 에셋은 이 문서 끝의 재현 명령으로 만든다.
+상태 기준: 2026-09-21. 규칙 계층·Unreal 프로젝트·M1/M2/M2b/M3 장면과 에셋은 이 문서 끝의 재현 명령으로 만든다.
 
 ## 완료
 
@@ -98,12 +98,12 @@ Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`).
 
 참고: `DefaultEngine.ini`의 시작 맵 `/Engine/Maps/Templates/OpenWorld`는 에디터가 `Untitled_1`로 열었다. M1에서 프로젝트 자체 맵을 만들면 교체한다.
 
-## M1·M2 재현 명령 (2026-09-20)
+## M1~M3 재현 명령 (2026-09-21)
 
 모든 에셋은 스크립트 산출물이다. 저장소 루트에서:
 
 ```bash
-# 1. 규칙 계층 테스트 (60개)
+# 1. 규칙 계층 테스트 (66개)
 cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
 
 # 2. 에셋 제작 (Blender 5.2, 각 약 1분; 공통 모듈 assets/blender/fishlib.py)
@@ -125,13 +125,14 @@ done
 # 4b. 한국어 폰트 (FontFace 에셋; 폰트 임포트는 commandlet에서 크래시하므로 ExecCmds 방식)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput -ExecCmds="py $PWD/unreal/Aquarium/Scripts/import_fonts.py, quit" 2>&1 | grep FONT_OK
 
-# 5. Unreal Automation 테스트 (26개)
+# 5. Unreal Automation 테스트 (36개)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -ExecCmds="Automation RunTests Aquarium; Quit" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep "Test Completed"
 
 # 6. 영상: M1 34초 유영(-dumpmovie, UI 없음) / M2 13.5초 입장→세션→나가기 흐름(UI 포함 프레임 캡처, 개발 전용 옵션)
 scripts/render_m1_video.sh
 scripts/render_m2_video.sh    # M2 흐름 -AquariumAutoNickname=니모(테스트 데이터만) -AquariumAutoExitAfter=8 -AquariumAssignmentSeed=1 -AquariumCaptureUI=<dir>
 scripts/render_m2b_video.sh   # M2b 산호초 22초 관람
+scripts/render_m3_video.sh    # M3 방향키 조종 20초 (개발 전용 -AquariumAutoNickname=니모(테스트 데이터만) -AquariumAutoInput="R3,U2,L3,D2,0 2,R2,U2,0 2" -AquariumAssignmentSeed=1 -AquariumCaptureUI=<dir>; 빌드 2회 포함 약 3분, SKIP_BUILD=1로 생략)
 scripts/measure_m2b_perf.sh   # 프레임 시간 CSV → docs/reviews/<날짜>-m2b-perf.md (-benchmark 미사용)
 ```
 
