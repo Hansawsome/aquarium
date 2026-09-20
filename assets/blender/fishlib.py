@@ -334,3 +334,62 @@ def build_species(spec):
                    spec.get("cam_rot", (1.35, 0, 0.42)))
     return dict(verts=len(body.data.vertices), bones=len(arm.data.bones),
                 unweighted=unweighted, root_max_w=root_max_w, pec_stray=pec_stray)
+
+
+# ---------------------------------------------------------------------------
+# M4a building blocks (additive; the classic build_body/add_fin path is unchanged)
+# ---------------------------------------------------------------------------
+
+def build_body_profile(name, length, profile, belly, width, sections=28, ring_segments=20):
+    """Lofted fish body from silhouette functions instead of a scaled sphere.
+
+    t runs 0 (nose, +X) to 1 (tail tip, -X). profile(t) is the height above the spine and belly(t)
+    the depth below it, width(t) the half width -- all in cm. Sections are elliptical but vertically
+    asymmetric (back and belly differ), which is what makes the silhouette read as a fish rather
+    than a capsule. The nose and tail rings collapse to a point so the mesh is closed and manifold.
+    Precondition: object mode, scene reset. Returns the body object (selected, active)."""
+    half = length / 2.0
+    bm = bmesh.new()
+
+    def ring(t):
+        """One closed cross-section ring at parameter t, as a list of bmesh verts."""
+        x = half - t * length
+        up = max(1e-4, profile(t))
+        down = max(1e-4, belly(t))
+        w = max(1e-4, width(t))
+        verts = []
+        for i in range(ring_segments):
+            a = 2.0 * math.pi * i / ring_segments
+            # a = 0 is the top of the section; sin drives y, cos drives z
+            cz = math.cos(a)
+            z = cz * (up if cz >= 0.0 else down)
+            y = math.sin(a) * w
+            verts.append(bm.verts.new((x, y, z)))
+        return verts
+
+    # interior rings only; the two ends are single points capped with fans
+    rings = [ring((i + 1) / (sections + 1.0)) for i in range(sections)]
+    nose = bm.verts.new((half, 0.0, 0.0))
+    tail = bm.verts.new((-half, 0.0, 0.0))
+
+    for a, b in zip(rings, rings[1:]):
+        for i in range(ring_segments):
+            j = (i + 1) % ring_segments
+            bm.faces.new((a[i], a[j], b[j], b[i]))
+    for i in range(ring_segments):          # nose fan
+        j = (i + 1) % ring_segments
+        bm.faces.new((nose, rings[0][j], rings[0][i]))
+    for i in range(ring_segments):          # tail fan
+        j = (i + 1) % ring_segments
+        bm.faces.new((tail, rings[-1][i], rings[-1][j]))
+
+    bm.normal_update()
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh); bm.free(); mesh.update()
+    body = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(body)
+    bpy.ops.object.select_all(action='DESELECT')
+    body.select_set(True); bpy.context.view_layer.objects.active = body
+    bpy.ops.object.shade_smooth()
+    return body
