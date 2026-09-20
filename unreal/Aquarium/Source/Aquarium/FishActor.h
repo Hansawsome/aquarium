@@ -41,12 +41,22 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Swim") TObjectPtr<USkeletalMesh> FishMesh = nullptr;
 	// True for the fish spawned by the game mode for the active player session (F-14).
 	UPROPERTY(VisibleAnywhere, Category = "Swim") bool bIsPlayerFish = false;
+	// When true the fish follows SetInputDirection instead of its wander behavior (F-05).
+	UPROPERTY(VisibleAnywhere, Category = "Swim") bool bPlayerControlled = false;
 
 	// Resets 2D state from the properties above and places the actor at the plane origin.
 	void InitializeSwim();
 	// Advances wander -> boundary avoidance -> motion, then applies transform and body wave.
 	void StepSwim(float DeltaSeconds);
 	float CurrentSpeed() const { return Motion.velocity.Length(); }
+
+	// Sets the desired swim direction in swim-plane coordinates (X = screen right, Y = screen up).
+	// Stored normalized, so a longer input vector can never exceed the normal swim speed. Only read
+	// when bPlayerControlled is true; a zero vector means "no input", and the fish coasts to a stop.
+	void SetInputDirection(const FVector2D& Dir);
+	// Freezes the whole simulation for this fish: position, facing and body wave (F-06).
+	void SetPaused(bool bInPaused);
+	bool IsPaused() const { return Motion.paused; }
 
 	void SetMesh(USkeletalMesh* Mesh);
 	bool HasBone(FName Bone) const;
@@ -78,6 +88,7 @@ private:
 	float SwimPhase = 0.f;   // accumulated wave phase (rad), advanced per tick
 	float LastHeadingDeg = 0.f;
 	bool bHasHeading = false; // false until the first step with non-zero speed; turn rate is 0 until then
+	aquarium::Vec2 InputDirection{0.f, 0.f}; // normalized; only used when bPlayerControlled
 	float BendTurnRate = 0.f; // signed deg/s fed to the body bend; ramp-limited, follows the slewed facing
 
 	// Chains Spine0..Tail component-space transforms from the reference pose with the wave angles.

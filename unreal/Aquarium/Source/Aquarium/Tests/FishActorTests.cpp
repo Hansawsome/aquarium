@@ -237,4 +237,50 @@ bool FFishActorUpVectorStaysUpright::RunTest(const FString&)
 	return TestTrue(FString::Printf(TEXT("lowest up vector at step %d points down (up = %s, up.Z = %.3f, tolerance %.3f)"), MinStep, *MinUp.ToString(), MinUpZ, MinUpZTolerance), MinUpZ > MinUpZTolerance);
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorFollowsInput, "Aquarium.Fish.PlayerControlledFollowsInput", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorFollowsInput::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnFish(World, 7u);
+	Fish->bPlayerControlled = true;
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));          // screen right
+	const FVector Before = Fish->GetActorLocation();
+	for (int i = 0; i < 20; ++i) Fish->StepSwim(0.05f);
+	const FVector After = Fish->GetActorLocation();
+	TestTrue(TEXT("moved along +Y (screen right)"), After.Y - Before.Y > 5.f);
+	TestTrue(TEXT("did not drift vertically"), FMath::Abs(After.Z - Before.Z) < 2.f);
+	Fish->SetInputDirection(FVector2D::ZeroVector);
+	for (int i = 0; i < 40; ++i) Fish->StepSwim(0.05f);
+	TestTrue(TEXT("stopped after release"), Fish->CurrentSpeed() < 1.f);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorPauseFreezes, "Aquarium.Fish.PausedDoesNotMove", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorPauseFreezes::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnFish(World, 7u);
+	Fish->bPlayerControlled = true;
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));
+	for (int i = 0; i < 10; ++i) Fish->StepSwim(0.05f);
+	Fish->SetPaused(true);
+	const FVector Frozen = Fish->GetActorLocation();
+	for (int i = 0; i < 20; ++i) Fish->StepSwim(0.05f);
+	TestTrue(TEXT("no movement while paused"), Fish->GetActorLocation().Equals(Frozen, 1e-3f));
+	Fish->SetPaused(false);
+	Fish->StepSwim(5.0f);
+	TestTrue(TEXT("no teleport on resume"), FVector::Dist(Fish->GetActorLocation(), Frozen) < 60.f);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorBackgroundIgnoresInput, "Aquarium.Fish.BackgroundIgnoresInput", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorBackgroundIgnoresInput::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* A = SpawnFish(World, 42u);
+	AFishActor* B = SpawnFish(World, 42u);
+	B->SetInputDirection(FVector2D(1.f, 0.f));             // not player-controlled: ignored
+	for (int i = 0; i < 40; ++i) { A->StepSwim(0.05f); B->StepSwim(0.05f); }
+	TestTrue(TEXT("same wander path"), A->GetActorLocation().Equals(B->GetActorLocation(), 1e-3f));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

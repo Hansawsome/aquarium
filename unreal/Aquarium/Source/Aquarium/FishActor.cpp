@@ -32,6 +32,7 @@ void AFishActor::InitializeSwim()
 	AnimParams.boneCount = SpineBoneNames().Num();
 	Wander.Emplace(Seed, Area, /*arriveRadius*/ 15.f, /*targetLifetime*/ 8.f);
 	SwimPhase = 0.f;
+	InputDirection = {0.f, 0.f};
 	LastHeadingDeg = 0.f;
 	bHasHeading = false;
 	BendTurnRate = 0.f;
@@ -49,9 +50,22 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	{
 		return;
 	}
+	// Return before anything else so a paused fish freezes completely: StepMotion already honours
+	// Motion.paused, but the facing slew and the body wave would otherwise keep animating in place.
+	if (Motion.paused)
+	{
+		return;
+	}
 
+	// The wander state is advanced either way, so a fish that stops being player-controlled resumes
+	// from a current target rather than a stale one.
 	Wander->Update(Motion.position, DeltaSeconds);
-	const aquarium::Vec2 Dir = aquarium::AvoidBoundary(Motion.position, Wander->DesiredDirection(Motion.position), Area, AvoidDistance);
+	// Player input replaces the wander target entirely; a zero input coasts the fish to a stop.
+	const aquarium::Vec2 Desired = bPlayerControlled ? InputDirection : Wander->DesiredDirection(Motion.position);
+	// SteerAlongBoundary instead of AvoidBoundary: background fish now slide along the walls too,
+	// which resolves the M1/M2b follow-up where a fish stalled at a wall, let its velocity reverse
+	// through zero and snapped its facing ~180 degrees.
+	const aquarium::Vec2 Dir = aquarium::SteerAlongBoundary(Motion.position, Desired, Area, AvoidDistance);
 	aquarium::StepMotion(Motion, Dir, MotionParamsValue, DeltaSeconds);
 	Motion.position = aquarium::ClampToArea(Motion.position, Area);
 
@@ -154,6 +168,17 @@ void AFishActor::ApplyBodyWave(const std::vector<float>& AnglesDeg)
 		Body->SetBoneTransformByName(Bones[i], Comp, EBoneSpaces::ComponentSpace);
 		ParentComp = Comp;
 	}
+}
+
+void AFishActor::SetInputDirection(const FVector2D& Dir)
+{
+	const FVector2D N = Dir.GetSafeNormal();
+	InputDirection = {static_cast<float>(N.X), static_cast<float>(N.Y)};
+}
+
+void AFishActor::SetPaused(bool bInPaused)
+{
+	Motion.paused = bInPaused;
 }
 
 void AFishActor::SetMesh(USkeletalMesh* Mesh)
