@@ -71,12 +71,20 @@ void AFishActor::StepSwim(float DeltaSeconds)
 		LastHeadingDeg = HeadingDeg;
 		bHasHeading = true;
 
-		// Build the facing frame from forward and the fixed plane normal (world +X) instead of
-		// FVector::Rotation(): for a YZ-plane forward, Rotation() flips yaw by 180 deg whenever the
-		// velocity crosses world Y = 0 and is degenerate at exactly vertical. X = forward,
-		// Y = lateral = plane normal, Z = their cross product; continuous for every heading.
+		// Build the facing frame from forward and world up instead of FVector::Rotation(): for a
+		// YZ-plane forward, Rotation() flips yaw by 180 deg whenever the velocity crosses world Y = 0.
+		// Anchoring local Z to world up keeps the dorsal fin up for every heading (anchoring the
+		// lateral axis to the plane normal instead would flip local Z with the heading sign and roll
+		// the fish upside-down for half of its headings). Headings within ~1.8 deg of vertical are
+		// degenerate with world up, so they keep the previous up for continuity; crossing the
+		// vertical then costs a 180 deg roll about the (near-vertical) forward axis, which the slew
+		// below spreads over MaxFacingTurnRate. The band width bounds how far the dorsal fin can dip
+		// below the horizon while inside it: sin(band) = sqrt(1 - 0.9995^2) ~= 0.032.
 		const aquarium::Vec3 F = Plane.Forward(Motion.velocity);
-		const FQuat Target = FRotationMatrix::MakeFromXY(FVector(F.x, F.y, F.z), FVector::XAxisVector).ToQuat();
+		const FVector Fwd(F.x, F.y, F.z);
+		const FQuat Target = (FMath::Abs(Fwd.Z) < 0.9995f)
+			? FRotationMatrix::MakeFromXZ(Fwd, FVector::UpVector).ToQuat()
+			: FRotationMatrix::MakeFromXZ(Fwd, GetActorUpVector()).ToQuat();
 		// The frame is continuous, but the 2D velocity itself can reverse through zero when the fish
 		// decelerates at a wall and re-accelerates the other way. Slew the facing at a bounded rate so
 		// the body never snaps; the first step after InitializeSwim snaps to its initial heading.

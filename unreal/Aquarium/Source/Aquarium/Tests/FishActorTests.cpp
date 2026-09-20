@@ -203,4 +203,38 @@ bool FFishActorBoneAnglesAreContinuous::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorUpVectorStaysUpright, "Aquarium.Fish.UpVectorStaysUpright",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorUpVectorStaysUpright::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnFish(World, 7u);
+	Fish->PlaneHalfWidth = 60.f; // narrow: the heading sweeps through both +Y and -Y often
+	Fish->PlaneHalfHeight = 150.f;
+	Fish->InitializeSwim();
+
+	// The fish swims on a vertical plane; its dorsal fin (local +Z) must stay above the horizon,
+	// whichever way it heads. At an exactly vertical heading the up vector is horizontal (up.Z == 0)
+	// and StepSwim holds the previous up while the heading is within ~1.8 deg of vertical, so allow
+	// a dip of a few degrees there; the bug this guards against rolls up.Z to about -1.
+	constexpr float MinUpZTolerance = -0.05f;
+	constexpr float Dt = 0.05f;
+	Fish->StepSwim(Dt); // warm-up: first step snaps to the initial heading
+	float MinUpZ = 1.f;
+	int MinStep = 0;
+	FVector MinUp = FVector::UpVector;
+	for (int i = 1; i < 300; ++i)
+	{
+		Fish->StepSwim(Dt);
+		const FVector Up = Fish->GetActorUpVector();
+		if (Up.Z < MinUpZ)
+		{
+			MinUpZ = Up.Z;
+			MinStep = i;
+			MinUp = Up;
+		}
+	}
+	return TestTrue(FString::Printf(TEXT("lowest up vector at step %d points down (up = %s, up.Z = %.3f, tolerance %.3f)"), MinStep, *MinUp.ToString(), MinUpZ, MinUpZTolerance), MinUpZ > MinUpZTolerance);
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
