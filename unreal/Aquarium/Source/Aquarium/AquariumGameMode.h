@@ -26,10 +26,12 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Session") TArray<FFishSpecies> Catalog;
 	// 0 -> seeded from the wall clock at BeginPlay; otherwise reproducible.
 	UPROPERTY(EditAnywhere, Category = "Session") int32 AssignmentSeed = 0;
-	// Swim plane given to the player fish; matches Scripts/build_reef_m1.py.
-	UPROPERTY(EditAnywhere, Category = "Session") FVector PlaneOrigin = FVector(330.f, 0.f, 110.f);
-	UPROPERTY(EditAnywhere, Category = "Session") float PlaneHalfWidth = 200.f;
-	UPROPERTY(EditAnywhere, Category = "Session") float PlaneHalfHeight = 100.f;
+	// Swim plane given to the player fish: closer than background fish so the player's fish reads
+	// larger (perspective); fits the 75° FOV at 2.2 m. Background fish (Scripts/build_reef_m1.py)
+	// stay at X >= 330.
+	UPROPERTY(EditAnywhere, Category = "Session") FVector PlaneOrigin = FVector(220.f, 0.f, 105.f);
+	UPROPERTY(EditAnywhere, Category = "Session") float PlaneHalfWidth = 130.f;
+	UPROPERTY(EditAnywhere, Category = "Session") float PlaneHalfHeight = 65.f;
 
 	EBeginSessionResult BeginSession(const FString& RawNickname);
 	void EndSession();

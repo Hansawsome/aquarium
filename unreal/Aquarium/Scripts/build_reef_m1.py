@@ -1,7 +1,7 @@
 # Builds the ReefM1 underwater scene from scratch: sand textures + M_Sand,
 # a procedural caustics light function (M_Caustics), and the level itself
 # (sand floor, sun with caustics, sky light, dense blue-teal height fog with
-# volumetric light shafts, the DiverCamera and one BlueTang FishActor).
+# volumetric light shafts, the DiverCamera and two background FishActors).
 # Idempotent: re-running replaces every asset in place (no *_1 duplicates).
 #
 # Run headless:
@@ -15,7 +15,6 @@ ROOT = os.path.abspath(os.path.join(unreal.Paths.project_dir(), "..", ".."))
 SAND_DIR = os.path.join(ROOT, "assets", "textures", "sand")
 ENV = "/Game/Env"
 MAP = "/Game/Maps/ReefM1"
-FISH_MESH = "/Game/Fish/BlueTang/SK_BlueTang"
 FISH_CLASS = "/Script/Aquarium.FishActor"
 ENGINE_PLANE = "/Engine/BasicShapes/Plane"                          # 100 x 100 cm, +Z normal
 ENGINE_SKY_CUBEMAP = "/Engine/MapTemplates/Sky/DaylightAmbientCubemap"
@@ -24,17 +23,19 @@ ENGINE_SKY_CUBEMAP = "/Engine/MapTemplates/Sky/DaylightAmbientCubemap"
 # Units: cm, degrees, lux (sun) / cd/m^2 (sky). Auto exposure is disabled in
 # this project (r.DefaultFeature.AutoExposure=False), so brightness is absolute.
 #
-# Camera at diver eye height looking along +X; the fish swims on a YZ plane in
-# front of it so it is seen side-on.
+# Camera at diver eye height looking along +X; fish swim on YZ planes in
+# front of it so they are seen side-on.
 CAM_LOC = (0.0, 0.0, 130.0)
 CAM_ROT = (-4.0, 0.0)                   # pitch, yaw
 CAM_FOV = 75.0
-# Swim plane: 4 x 2 m centred 3.3 m ahead. This deviates from the spec's
-# 6 x 3 m because at 3.3 m the 75 deg FOV only spans ~4.9 m; a 6 m plane would
-# let the fish wander out of frame.
-FISH_ORIGIN = (330.0, 0.0, 110.0)
-FISH_HALF_W, FISH_HALF_H = 200.0, 100.0
-FISH_SEED = 7
+# Background fish (label, mesh path, seed, origin, half_w, half_h). All at X >= 330 so the player's
+# fish (spawned by the game mode at X = 220) is nearer the camera and reads larger.
+# Planes are ~4 x 2 m: at 3.3 m the 75 deg FOV only spans ~4.9 m, so a wider
+# plane would let a fish wander out of frame.
+BACKGROUND_FISH = [
+    ("BlueTang_BG",  "/Game/Fish/BlueTang/SK_BlueTang",   7,  (380.0, -60.0, 115.0), 220.0, 105.0),
+    ("Clownfish_BG", "/Game/Fish/Clownfish/SK_Clownfish", 11, (330.0,  70.0, 100.0), 200.0,  95.0),
+]
 FISH_EDITOR_YAW = 90.0                  # side-on in editor stills; runtime facing follows velocity
 
 FLOOR_Z = 1.0                           # above the editor grid (z=0) so captures do not z-fight
@@ -313,20 +314,21 @@ cam.camera_component.set_field_of_view(CAM_FOV)
 
 fish_cls = unreal.load_class(None, FISH_CLASS)
 assert fish_cls is not None, "FishActor class not found (is the C++ module built?)"
-fish = spawn(fish_cls, FISH_ORIGIN, (0.0, FISH_EDITOR_YAW), label="BlueTang")
-sk = unreal.load_asset(FISH_MESH)
-assert isinstance(sk, unreal.SkeletalMesh), "fish mesh missing: %s" % FISH_MESH
-fish.set_editor_property("fish_mesh", sk)
-fish.set_editor_property("plane_origin", unreal.Vector(*FISH_ORIGIN))
-fish.set_editor_property("seed", FISH_SEED)
-fish.set_editor_property("plane_half_width", FISH_HALF_W)
-fish.set_editor_property("plane_half_height", FISH_HALF_H)
-# The actor applies FishMesh to its body only at BeginPlay; push it now so the
-# fish is visible in the editor / review captures too.
-body = fish.get_component_by_class(unreal.PoseableMeshComponent)
-assert body is not None, "fish has no PoseableMeshComponent"
-body.set_skinned_asset_and_update(sk)
-body.set_visibility(True)
+for label, mesh_path, seed, origin, half_w, half_h in BACKGROUND_FISH:
+    fish = spawn(fish_cls, origin, (0.0, FISH_EDITOR_YAW), label=label)
+    sk = unreal.load_asset(mesh_path)
+    assert isinstance(sk, unreal.SkeletalMesh), "fish mesh missing: %s" % mesh_path
+    fish.set_editor_property("fish_mesh", sk)
+    fish.set_editor_property("plane_origin", unreal.Vector(*origin))
+    fish.set_editor_property("seed", seed)
+    fish.set_editor_property("plane_half_width", half_w)
+    fish.set_editor_property("plane_half_height", half_h)
+    # The actor applies FishMesh to its body only at BeginPlay; push it now so the
+    # fish is visible in the editor / review captures too.
+    body = fish.get_component_by_class(unreal.PoseableMeshComponent)
+    assert body is not None, "%s has no PoseableMeshComponent" % label
+    body.set_skinned_asset_and_update(sk)
+    body.set_visibility(True)
 
 assert les.save_current_level(), "save_current_level failed"
 print("REEF_OK actors=%d map=%s" % (len(eas.get_all_level_actors()), MAP))
