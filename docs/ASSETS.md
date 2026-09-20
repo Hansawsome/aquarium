@@ -7,6 +7,7 @@
 | 에셋 | 저작자 | 원본 URL | 다운로드일 | 라이선스 | 출처 표기 | 수정 | 게임 배포 | 공개 저장소 재배포 | 로컬 경로 |
 |---|---|---|---|---|---|---|---|---|---|
 | Poly Haven `coast_sand_01` (모래 텍스처 2K: diffuse, normal GL, roughness) | Rob Tuytel | https://polyhaven.com/a/coast_sand_01 | 2026-09-20 | CC0 1.0 (https://polyhaven.com/license) | 불필요 (자발적 표기: "Textures from Poly Haven") | 없음 | 가능 | 가능 | `assets/textures/sand/` |
+| Noto Sans KR Regular (한국어 UI 폰트) | Google / Adobe (Noto CJK 프로젝트) | https://github.com/notofonts/noto-cjk | 2026-09-20 | SIL OFL 1.1 (`assets/fonts/OFL.txt`) | 불필요 (OFL: 폰트 단독 판매 금지, 임베드·재배포 허용) | 없음 | 가능 | 가능 | `assets/fonts/` |
 
 ## 직접 제작
 
