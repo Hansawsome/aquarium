@@ -48,7 +48,7 @@ macOS 시제품에서 PRD 경험 흐름을 완성한다: 실행 → 산호초 �
 - `UWidgetComponent`(Screen space, 물고기 위 +20 cm)로 별명 `UTextBlock` 표시. 플레이어 물고기에만 부착한다. 폰트는 Noto Sans KR.
 
 ### 폰트
-- `assets/fonts/NotoSansKR-Regular.otf`(OFL 사본 `OFL.txt` 포함) → `Scripts/import_fonts.py`로 `/Game/UI/F_NotoSansKR` 폰트 에셋 생성. 위젯의 모든 텍스트가 이 폰트를 쓴다. 패키지에 포함되는지는 M5에서 확인.
+- `assets/fonts/NotoSansKR-Regular.otf`(OFL 사본 `OFL.txt` 포함) → `Scripts/import_fonts.py`로 `/Game/UI/FF_NotoSansKR` FontFace 에셋 생성(UE 5.8 Python은 `Font` 합성 불가 → C++ `FUiFont`가 런타임 폰트를 합성). 위젯의 모든 텍스트가 이 폰트를 쓴다. `DefaultGame.ini`의 `DirectoriesToAlwaysCook=/Game/UI`로 쿡에 포함. 패키지에 포함되는지는 M5에서 확인.
 
 ### 클라운피시
 - `assets/blender/fishlib.py`: 블루탱 스크립트의 몸통·지느러미·리깅·베이크·내보내기 단계를 함수로 추출(파라미터: 몸통 치수, 지느러미 표, 텍스처 노드 빌더, 이름).

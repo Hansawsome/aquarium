@@ -31,11 +31,11 @@ M0 진행(2026-09-20): Blender/CMake/Git LFS·Blender MCP 완료. Xcode 27.0 + U
 ## 검증 현황
 
 - 규칙 계층(C++17, Unreal 독립) 테스트: **60개 통과** — 2026-09-20, 브랜치 `feat/m1-scene`, 커밋 `e56d1fe` (`-Wall -Wextra -Wshadow` 경고 0). M1에서 SwimPlane, SwimAnimation(누적 위상), Heading 추가. 클린 빌드 `cmake -S . -B build && cmake --build build -j && ctest --test-dir build` 결과 `100% tests passed out of 60`. 각 태스크는 헤더 부재 컴파일 실패 → 스텁 assertion 실패(RED) → 구현 통과(GREEN) 순서로 진행했고 커밋 단위로 기록됨. 다룬 SRS 항목: F-01, F-02, F-03, F-05, F-06, F-07, F-08, F-10, F-11, F-12, F-14의 규칙 부분.
-- Unreal Automation 테스트: **24개 Success** (`Automation RunTests Aquarium`, 헤드리스 `-nullrhi`): 규칙 링크 1, `AFishActor` 7(규칙 계층 구동·dt=0·결정성·본 존재·연쇄 본 변환·방향 연속성·본 각도 연속성), 게임 모드 1. F-13의 "순간 반전 없음"은 `FacingIsContinuous`/`BoneAnglesAreContinuous`로 고정.
+- Unreal Automation 테스트: **24개 Success** (`Automation RunTests Aquarium`, 헤드리스 `-nullrhi`): 규칙 링크 1, `AFishActor` 8(규칙 계층 구동·dt=0·결정성·본 존재·연쇄 본 변환·방향 연속성·본 각도 연속성·바로 선 자세), 게임 모드 1, 세션 5(F-02/F-03/F-14), 이름표 2(F-04·한글 글리프), UI 3(F-01 문구·분류·이중 제출 방어), 컨트롤러 4(결과→오류 매핑, 개발 옵션 파싱). F-13의 "순간 반전 없음"은 `FacingIsContinuous`/`BoneAnglesAreContinuous`/`UpVectorStaysUpright`로 고정.
 - 시각 검토(M2): `docs/reviews/2026-09-20-m2-{flow.mp4,entry.png,nametag.png,after-exit.png}` — 개발 전용 옵션(`-AquariumAutoNickname`, `-AquariumAutoExitAfter`, `-AquariumAssignmentSeed`, `-AquariumCaptureUI`)으로 재현. 제작자 확인: 한글 입장 화면, 앞쪽 큰 플레이어 물고기 위 이름표 추적, HUD 나가기, 퇴장 후 복귀. **사용자 검토 결과: 대기.** 알려진 품질 한계: 수직으로 방향을 바꿀 때 짧은 롤(0.3초), 가까운 블루탱의 짙은 남색 텍스처.
 - 시각 검토(M1): `docs/reviews/2026-09-20-m1-still.png`, `docs/reviews/2026-09-20-m1-swim.mp4`. 제작자 자체 확인: 수중 안개·빛줄기·바닥 코스틱·모래·블루탱 유영이 보이고 영상 내 순간이동·반전 없음. **사용자 검토 결과(2026-09-20): 병합 승인, 코멘트 없음.** 알려진 품질 한계: 물고기 모델은 1차 실루엣(실사 아님), 빛줄기 약함, 검은 옆줄무늬가 거리 때문에 잘 안 보임.
-- 미구현 Unreal 연동: F-04 이름표, F-09 레이캐스트, 입력 이벤트·세션 UI — M2~M4.
+- 미구현 Unreal 연동: F-09 레이캐스트(M4), 방향키 입력·포커스(M3).
 - 성능 측정·패키징: 미실행 — M5.
 - Unreal 빌드: 에디터·게임 타깃 컴파일 성공, 헤드리스 에디터 실행 성공 (2026-09-20, SETUP.md). 화면·성능: 미실행.
 - 무료 에셋: Poly Haven `coast_sand_01` (CC0) 도입, `docs/ASSETS.md`에 출처 기록. 물고기·텍스처는 직접 제작.
-- 현재 완료 범위: 설계 문서, 개발 도구·MCP 연결(M0), 규칙 계층, M1 수중 장면·블루탱 유영 영상(사용자 검토 대기).
+- 현재 완료 범위: 설계 문서, 개발 도구·MCP 연결(M0), 규칙 계층, M1 수중 장면(사용자 승인), M2 별명·세션·배정·이름표(사용자 검토 대기).
