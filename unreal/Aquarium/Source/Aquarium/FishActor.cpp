@@ -182,6 +182,10 @@ UNameTagComponent* AFishActor::AttachNameTag(const FText& Name)
 		NameTag->SetupAttachment(Body);
 		NameTag->RegisterComponent();
 	}
+	// The rig origin is the body center, so the local bounds half-height is the distance to the
+	// top of the mesh (dorsal fin included). Place the tag that far plus a margin above the origin.
+	const float HalfHeight = static_cast<float>(Body->CalcBounds(FTransform::Identity).BoxExtent.Z);
+	NameTag->SetRelativeLocation(FVector(0.f, 0.f, HalfHeight + NameTag->HeightMargin));
 	NameTag->SetDisplayedName(Name);
 	return NameTag;
 }

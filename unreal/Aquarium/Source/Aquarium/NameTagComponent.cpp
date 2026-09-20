@@ -7,6 +7,8 @@ UNameTagComponent::UNameTagComponent()
 	SetWidgetSpace(EWidgetSpace::Screen);
 	SetDrawAtDesiredSize(true);
 	SetWidgetClass(UNameTagWidget::StaticClass());
+	// Bottom-center pivot: the label's bottom edge sits at the component's projected location.
+	SetPivot(FVector2D(0.5f, 1.0f));
 	SetRelativeLocation(FVector(0.f, 0.f, 20.f));
 }
 

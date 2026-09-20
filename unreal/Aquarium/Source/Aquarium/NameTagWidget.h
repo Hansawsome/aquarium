@@ -14,7 +14,7 @@ class AQUARIUM_API UNameTagWidget : public UUserWidget
 
 public:
 	void SetName(const FText& InName);
-	FText Name() const { return PendingName; }
+	FText DisplayedName() const { return PendingName; }
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;

@@ -14,6 +14,9 @@ class AQUARIUM_API UNameTagComponent : public UWidgetComponent
 public:
 	UNameTagComponent();
 
+	// Gap (cm) between the top of the fish body bounds and the bottom edge of the label.
+	UPROPERTY(EditAnywhere, Category = "NameTag") float HeightMargin = 6.f;
+
 	void SetDisplayedName(const FText& InName);
 	// The stored text; valid even when no widget exists (e.g. a test world without a local player).
 	FText DisplayedName() const { return Name; }

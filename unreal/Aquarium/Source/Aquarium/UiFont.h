@@ -10,6 +10,7 @@ struct AQUARIUM_API FUiFont
 	// Slate font info for the Korean UI face at the given size. Falls back to the engine
 	// default font (with a one-time warning) when the face asset cannot be loaded.
 	static FSlateFontInfo Get(int32 Size);
-	// True when the last Get() resolved the Noto Sans KR face rather than the fallback.
+	// Certifies the FontFace asset resolved and a runtime font was composed after a Get();
+	// glyph coverage is verified separately (see Tests/NameTagTests.cpp).
 	static bool IsKoreanFontLoaded();
 };
