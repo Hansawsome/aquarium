@@ -6,3 +6,4 @@ unreal/**/Saved/
 unreal/**/.vs/
 unreal/**/*.xcworkspace/
 *.blend1
+.DS_Store
