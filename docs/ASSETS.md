@@ -18,8 +18,13 @@
 | 옐로탱 (YellowTang) | Blender 5.2.2 LTS | `assets/blender/make_yellowtang.py` (+ `fishlib.py`) | `assets/blender/YellowTang.blend`, `assets/blender/export/YellowTang.fbx`, `T_YellowTang_BaseColor.png` (2048², 절차적 베이크), `preview_yellowtang.png` | 없음 |
 | 나비고기 (Butterflyfish) | Blender 5.2.2 LTS | `assets/blender/make_butterflyfish.py` (+ `fishlib.py`) | `assets/blender/Butterflyfish.blend`, `assets/blender/export/Butterflyfish.fbx`, `T_Butterflyfish_BaseColor.png` (2048², 절차적 베이크), `preview_butterflyfish.png` | 없음 |
 | 자리돔 (Damselfish) | Blender 5.2.2 LTS | `assets/blender/make_damselfish.py` (+ `fishlib.py`) | `assets/blender/Damselfish.blend`, `assets/blender/export/Damselfish.fbx`, `T_Damselfish_BaseColor.png` (2048², 절차적 베이크), `preview_damselfish.png` | 없음 |
+| 가지 산호 (BranchCoral) | Blender 5.2.2 LTS | `assets/blender/make_corals.py` (+ `fishlib.py`) | `assets/blender/BranchCoral.blend`, `assets/blender/export/BranchCoral.fbx`, `T_BranchCoral_BaseColor.png` (1024², 절차적 베이크), 공용 `preview_corals.png` | 없음 |
+| 판상 산호 (PlateCoral) | Blender 5.2.2 LTS | `assets/blender/make_corals.py` (+ `fishlib.py`) | `assets/blender/PlateCoral.blend`, `assets/blender/export/PlateCoral.fbx`, `T_PlateCoral_BaseColor.png` (1024², 절차적 베이크), 공용 `preview_corals.png` | 없음 |
+| 뇌 산호 (BrainCoral) | Blender 5.2.2 LTS | `assets/blender/make_corals.py` (+ `fishlib.py`) | `assets/blender/BrainCoral.blend`, `assets/blender/export/BrainCoral.fbx`, `T_BrainCoral_BaseColor.png` (1024², 절차적 베이크), 공용 `preview_corals.png` | 없음 |
 
 블루탱 비고: `assets/blender/export/preview_bluetang.png`(EEVEE 미리보기 렌더)도 스크립트 산출물이다. `.blend`/`.fbx`/`preview_bluetang.png`는 재빌드마다 바이트가 달라진다(타임스탬프·세션 데이터, EEVEE 노이즈). 베이크된 `T_BlueTang_BaseColor.png`는 실행마다 UV 솔기 부근 수십 서브픽셀이 최대 1/255 흔들린다(2026-09-20 측정). 재현성 검사는 `scripts/compare_texture.py`(픽셀당 최대 델타 ≤ 2/255, 달라진 픽셀 ≤ 0.01%)로 한다. Subdivision 모디파이어는 의도적으로 생략했다(shade_smooth만 적용).
+
+산호 비고: 산호 3종은 정적 프롭이라 아마추어·애니메이션이 없다(메시 + 베이크 베이스컬러만). `make_corals.py` 한 스크립트가 세 종을 모두 생성하며, 형상은 고정 시드(`random.Random`)와 결정론적 수식으로 재현된다. 미리보기는 세 산호를 x = -120 / 0 / 120에 늘어놓은 공용 `assets/blender/export/preview_corals.png` 한 장이다.
 
 ## 도입 시 필수 기록
 

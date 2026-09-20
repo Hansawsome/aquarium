@@ -87,7 +87,7 @@ SPEC = dict(
     color_fn=bluetang_color,
     rig=dict(pec_z=0.5, tail_tip_x=None, pec_span_y=4.0, pec_drop_z=2.5),
     spine=SPINE,
-    cam_loc=(20, -45, 10),
+    cam_loc=(32.0, -72.0, 16.0),   # pulled back 1.6x so fins stay in frame
     cam_rot=(1.35, 0, 0.42),
     root_dir=ROOT,
     export_dir=EXPORT,

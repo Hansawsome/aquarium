@@ -90,7 +90,7 @@ SPEC = dict(
     color_fn=yellowtang_color,
     rig=dict(pec_z=0.4, tail_tip_x=-BODY_LEN / 2 - 5.0, pec_span_y=3.2, pec_drop_z=2.0),
     spine=SPINE,
-    cam_loc=(17, -38, 8),
+    cam_loc=(27.2, -60.8, 12.8),   # pulled back 1.6x so fins stay in frame
     cam_rot=(1.35, 0, 0.42),
     root_dir=ROOT,
     export_dir=EXPORT,

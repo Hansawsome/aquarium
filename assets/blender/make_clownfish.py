@@ -126,7 +126,7 @@ SPEC = dict(
     rig=dict(pec_z=0.3, tail_tip_x=-L_HALF - 2.6, pec_span_y=2.0, pec_drop_z=1.2),
     spine=SPINE,
     pec_window=(0.0, 0.4),
-    cam_loc=(12, -28, 6),
+    cam_loc=(19.2, -44.8, 9.6),   # pulled back 1.6x so fins stay in frame
     cam_rot=(1.35, 0, 0.42),
     root_dir=ROOT,
     export_dir=EXPORT,

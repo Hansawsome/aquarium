@@ -91,7 +91,7 @@ SPEC = dict(
     color_fn=damselfish_color,
     rig=dict(pec_z=0.25, tail_tip_x=-BODY_LEN / 2 - 1.8, pec_span_y=1.4, pec_drop_z=0.8),
     spine=SPINE,
-    cam_loc=(7, -16, 3.5),
+    cam_loc=(11.2, -25.6, 5.6),   # pulled back 1.6x so fins stay in frame
     cam_rot=(1.35, 0, 0.42),
     root_dir=ROOT,
     export_dir=EXPORT,

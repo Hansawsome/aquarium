@@ -93,7 +93,7 @@ SPEC = dict(
     color_fn=butterflyfish_color,
     rig=dict(pec_z=0.35, tail_tip_x=-BODY_LEN / 2 - 3.2, pec_span_y=2.4, pec_drop_z=1.4),
     spine=SPINE,
-    cam_loc=(12, -28, 6),
+    cam_loc=(24.0, -56.0, 12.0),   # pulled back 2.0x: the tall dorsal fin needs more room than the other species
     cam_rot=(1.35, 0, 0.42),
     root_dir=ROOT,
     export_dir=EXPORT,
