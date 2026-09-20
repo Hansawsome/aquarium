@@ -40,7 +40,8 @@ bool FNameTagOnlyOnPlayerFish::RunTest(const FString&)
 		return false;
 	}
 	TestEqual(TEXT("tag shows nickname"), Tag->DisplayedName().ToString(), FString(TEXT("니모")));
-	TestTrue(TEXT("tag sits above the fish"), Tag->GetRelativeLocation().Z > 0.f);
+	// World-space check: the anchor must be above the actor origin regardless of the fish's facing.
+	TestTrue(TEXT("tag sits above the fish"), Tag->GetComponentLocation().Z - Player->GetActorLocation().Z > 0.f);
 	TestNull(TEXT("background fish has no tag"), Background->FindComponentByClass<UNameTagComponent>());
 
 	GM->EndSession();

@@ -56,4 +56,22 @@ bool FControllerUiCaptureDir::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FControllerAssignmentSeed, "Aquarium.Controller.ParsesAssignmentSeed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FControllerAssignmentSeed::RunTest(const FString&)
+{
+	int32 Seed = -1;
+	TestTrue(TEXT("parses"), ADiverPlayerController::ParseAssignmentSeed(TEXT("-game -AquariumAssignmentSeed=7 -seconds=14"), Seed));
+	TestEqual(TEXT("seed"), Seed, 7);
+	TestTrue(TEXT("negative"), ADiverPlayerController::ParseAssignmentSeed(TEXT("-AquariumAssignmentSeed=-3"), Seed));
+	TestEqual(TEXT("negative seed"), Seed, -3);
+	TestFalse(TEXT("zero is rejected"), ADiverPlayerController::ParseAssignmentSeed(TEXT("-AquariumAssignmentSeed=0"), Seed));
+	TestFalse(TEXT("non-numeric"), ADiverPlayerController::ParseAssignmentSeed(TEXT("-AquariumAssignmentSeed=abc"), Seed));
+	TestFalse(TEXT("absent"), ADiverPlayerController::ParseAssignmentSeed(TEXT("-AquariumAutoNickname=x"), Seed));
+	TestEqual(TEXT("cleared"), Seed, 0);
+	TestFalse(TEXT("null"), ADiverPlayerController::ParseAssignmentSeed(nullptr, Seed));
+	return true;
+}
+
 #endif

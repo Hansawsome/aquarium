@@ -30,6 +30,8 @@ public:
 	// Parses -AquariumCaptureUI=<absolute dir>; false when absent or empty. Dev-only frame capture
 	// that, unlike -dumpmovie, includes the Slate/UMG layer in every frame.
 	static bool ParseUiCaptureDir(const TCHAR* CmdLine, FString& OutDir);
+	// Parses -AquariumAssignmentSeed=<int>; false when absent, non-numeric or 0.
+	static bool ParseAssignmentSeed(const TCHAR* CmdLine, int32& OutSeed);
 
 protected:
 	virtual void BeginPlay() override;
@@ -47,6 +49,7 @@ private:
 	AAquariumGameMode* GameMode() const;
 	void StartAutoReplayIfRequested();
 	void StartUiCaptureIfRequested();
+	void ApplyAssignmentSeedIfRequested();
 	// Non-empty while the dev-only UI capture is active; one screenshot request per tick.
 	FString UiCaptureDir;
 	int32 UiCaptureFrame = 0;

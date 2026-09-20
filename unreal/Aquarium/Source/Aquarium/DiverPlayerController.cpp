@@ -55,6 +55,7 @@ void ADiverPlayerController::BeginPlay()
 	Entry->AddToViewport(kEntryZOrder);
 	Hud->AddToViewport(kHudZOrder);
 	ShowEntry();
+	ApplyAssignmentSeedIfRequested();
 	StartAutoReplayIfRequested();
 	StartUiCaptureIfRequested();
 }
@@ -252,5 +253,34 @@ void ADiverPlayerController::StartUiCaptureIfRequested()
 	}
 	UiCaptureDir = Dir;
 	UiCaptureFrame = 0;
+#endif
+}
+
+bool ADiverPlayerController::ParseAssignmentSeed(const TCHAR* CmdLine, int32& OutSeed)
+{
+	OutSeed = 0;
+	FString Value;
+	if (!CmdLine || !FParse::Value(CmdLine, TEXT("-AquariumAssignmentSeed="), Value) || !Value.IsNumeric())
+	{
+		return false;
+	}
+	OutSeed = FCString::Atoi(*Value);
+	return OutSeed != 0;
+}
+
+void ADiverPlayerController::ApplyAssignmentSeedIfRequested()
+{
+#if !UE_BUILD_SHIPPING
+	// Dev-only: pins the species assignment (and the player fish's swim seed) so review captures
+	// are reproducible run to run.
+	int32 Seed = 0;
+	if (!ParseAssignmentSeed(FCommandLine::Get(), Seed))
+	{
+		return;
+	}
+	if (AAquariumGameMode* GM = GameMode())
+	{
+		GM->SetAssignmentSeed(Seed);
+	}
 #endif
 }

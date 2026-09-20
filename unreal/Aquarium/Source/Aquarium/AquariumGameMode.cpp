@@ -41,6 +41,17 @@ void AAquariumGameMode::SetCatalogForTest(const TArray<FFishSpecies>& InCatalog,
 	RebuildLoadedCatalog();
 }
 
+bool AAquariumGameMode::SetAssignmentSeed(int32 Seed)
+{
+	if (Seed == 0 || Session.HasActiveSession())
+	{
+		return false;
+	}
+	AssignmentSeed = Seed;
+	Rng.Initialize(Seed);
+	return true;
+}
+
 void AAquariumGameMode::RebuildLoadedCatalog()
 {
 	LoadedCatalogIndices.Reset();

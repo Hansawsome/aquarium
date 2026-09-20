@@ -46,6 +46,9 @@ public:
 	// Replaces the catalog, reseeds and reloads meshes without waiting for BeginPlay.
 	// Ends any active session first so loaded indices cannot dangle.
 	void SetCatalogForTest(const TArray<FFishSpecies>& InCatalog, int32 Seed);
+	// Re-seeds the species/swim RNG for reproducible captures; ignored (false) while a session
+	// is active or when Seed is 0.
+	bool SetAssignmentSeed(int32 Seed);
 
 protected:
 	virtual void BeginPlay() override;

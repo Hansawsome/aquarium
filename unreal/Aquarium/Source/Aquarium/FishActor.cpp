@@ -180,14 +180,27 @@ UNameTagComponent* AFishActor::AttachNameTag(const FText& Name)
 	{
 		NameTag = NewObject<UNameTagComponent>(this, TEXT("NameTag"));
 		NameTag->SetupAttachment(Body);
+		// The facing frame (see StepSwim) makes the actor's local up flip with the heading, so the
+		// tag must not inherit Body's rotation: keep it in world space and re-anchor it each tick.
+		NameTag->SetUsingAbsoluteLocation(true);
+		NameTag->SetUsingAbsoluteRotation(true);
 		NameTag->RegisterComponent();
 	}
 	// The rig origin is the body center, so the local bounds half-height is the distance to the
 	// top of the mesh (dorsal fin included). Place the tag that far plus a margin above the origin.
 	const float HalfHeight = static_cast<float>(Body->CalcBounds(FTransform::Identity).BoxExtent.Z);
-	NameTag->SetRelativeLocation(FVector(0.f, 0.f, HalfHeight + NameTag->HeightMargin));
+	NameTagHeight = HalfHeight + NameTag->HeightMargin;
+	UpdateNameTagLocation();
 	NameTag->SetDisplayedName(Name);
 	return NameTag;
+}
+
+void AFishActor::UpdateNameTagLocation()
+{
+	if (NameTag)
+	{
+		NameTag->SetWorldLocation(GetActorLocation() + FVector(0.f, 0.f, NameTagHeight));
+	}
 }
 
 void AFishActor::BeginPlay()
@@ -200,4 +213,5 @@ void AFishActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	StepSwim(DeltaSeconds);
+	UpdateNameTagLocation();
 }

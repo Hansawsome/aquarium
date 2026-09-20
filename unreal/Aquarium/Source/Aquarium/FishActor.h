@@ -65,6 +65,9 @@ public:
 private:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UPoseableMeshComponent> Body = nullptr;
 	UPROPERTY() TObjectPtr<UNameTagComponent> NameTag = nullptr;
+	// World-space height of the name tag anchor above the actor origin (bounds + margin).
+	float NameTagHeight = 0.f;
+	void UpdateNameTagLocation();
 
 	aquarium::SwimPlane Plane;
 	aquarium::Rect Area;

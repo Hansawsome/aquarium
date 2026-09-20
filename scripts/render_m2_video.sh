@@ -11,6 +11,10 @@
 #   2-10 s  session, player fish with name tag -> <date>-m2-nametag.png    (t=6)
 #   10-14 s entry widget again after exit      -> <date>-m2-after-exit.png (t=12.5)
 #
+# -AquariumAssignmentSeed pins the species pick (seed 1 -> blue tang for the
+# player, so the size contrast against the background fish is obvious) and the
+# player fish's swim seed; without it the assignment differs run to run.
+#
 # The nickname passed via -AquariumAutoNickname is TEST DATA ONLY: the engine
 # echoes the whole command line into its log, so never put a real user's
 # nickname here.
@@ -37,6 +41,7 @@ WATCHDOG_SEC="${WATCHDOG_SEC:-300}"
 # Test-only nickname and the exit delay (seconds after the auto submit).
 AUTO_NICKNAME="${AUTO_NICKNAME:-니모}"
 AUTO_EXIT_AFTER="${AUTO_EXIT_AFTER:-8}"
+ASSIGNMENT_SEED="${ASSIGNMENT_SEED:-1}"
 DATE="$(date +%F)"
 OUT="$ROOT/docs/reviews/$DATE-m2-flow.mp4"
 
@@ -56,7 +61,7 @@ START=$(date +%s)
   -benchmark -fps="$FPS" -seconds="$SECONDS_TO_RUN" \
   -notexturestreaming -unattended -nosplash -log \
   -AquariumAutoNickname="$AUTO_NICKNAME" -AquariumAutoExitAfter="$AUTO_EXIT_AFTER" \
-  -AquariumCaptureUI="$FRAMES" \
+  -AquariumCaptureUI="$FRAMES" -AquariumAssignmentSeed="$ASSIGNMENT_SEED" \
   >/dev/null 2>&1 &
 PID=$!
 

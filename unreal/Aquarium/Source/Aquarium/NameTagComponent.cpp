@@ -8,6 +8,8 @@ UNameTagComponent::UNameTagComponent()
 	SetDrawAtDesiredSize(true);
 	SetWidgetClass(UNameTagWidget::StaticClass());
 	// Bottom-center pivot: the label's bottom edge sits at the component's projected location.
+	// The location itself is kept in WORLD space by AFishActor (the fish's local up flips with
+	// its heading, so a Body-relative +Z offset would put the tag below the fish half the time).
 	SetPivot(FVector2D(0.5f, 1.0f));
 	SetRelativeLocation(FVector(0.f, 0.f, 20.f));
 }
