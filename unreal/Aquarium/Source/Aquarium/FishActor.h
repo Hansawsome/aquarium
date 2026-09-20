@@ -37,6 +37,8 @@ public:
 	// step at 1 rad regardless of DeltaSeconds, so on hitch frames the effective cap is ~57 deg.
 	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "1")) float MaxFacingTurnRate = 540.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") TObjectPtr<USkeletalMesh> FishMesh = nullptr;
+	// True for the fish spawned by the game mode for the active player session (F-14).
+	UPROPERTY(VisibleAnywhere, Category = "Swim") bool bIsPlayerFish = false;
 
 	// Resets 2D state from the properties above and places the actor at the plane origin.
 	void InitializeSwim();
