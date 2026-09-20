@@ -62,10 +62,26 @@ PROP_MESHES = [
     ("/Game/Props/SM_rock_07",     (2.0, 4.0)),
     ("/Game/Props/SM_rock_09",     (4.0, 8.0)),
 ]
+# Unscaled XY half-extents (cm) from the import log; the placement radius is
+# max(x, y) * actor scale.
+PROP_HALF_EXTENTS = {
+    "SM_BranchCoral": (28.3, 22.2),
+    "SM_PlateCoral":  (52.6, 52.8),
+    "SM_BrainCoral":  (31.4, 31.4),
+    "SM_boulder_01":  (63.6, 91.5),
+    "SM_rock_07":     (8.4, 16.0),
+    "SM_rock_09":     (3.7, 7.2),
+}
 PROP_X = (150.0, 800.0)
 PROP_Y = (-400.0, 400.0)
-PROP_CLEAR_RADIUS_Y = 60.0     # keep the camera's forward lane clear of props
-PROP_CLEAR_X = 320.0
+PROP_SEPARATION = 0.9          # required gap as a fraction of the summed radii
+PROP_SEPARATION_RELAXED = 0.75 # fallback when a prop cannot be placed
+PROP_PLACE_TRIES = 200
+# The camera's forward lane stays clear of props; it widens with distance so a
+# far prop does not occlude the school either.
+PROP_CLEAR_RADIUS_Y = 60.0     # lane half-width at PROP_X[0]
+PROP_CLEAR_TAPER = 0.10        # extra half-width per cm of X
+PROP_CLEAR_MARGIN = 5.0        # pushed props clear the boundary by this much
 
 FISH_EDITOR_YAW = 90.0                  # side-on in editor stills; runtime facing follows velocity
 
@@ -379,18 +395,51 @@ for i in range(SCHOOL_COUNT):
 
 # Props: scattered static meshes on the sand floor, seeded separately so
 # changing the school does not reshuffle the reef.
+def lane_half_width(x):
+    """Half-width of the camera's clear forward lane at distance x."""
+    return PROP_CLEAR_RADIUS_Y + (x - PROP_X[0]) * PROP_CLEAR_TAPER
+
+
 prng = random.Random(PROP_SEED)
 prop_count = 0
-for i in range(PROP_COUNT):
-    mesh_path, scale_range = prng.choice(PROP_MESHES)
-    x = prng.uniform(*PROP_X)
-    y = prng.uniform(*PROP_Y)
-    # Keep the camera's forward lane clear: push offenders sideways, same sign.
-    if abs(y) < PROP_CLEAR_RADIUS_Y and x < PROP_CLEAR_X:
-        y = math.copysign(PROP_CLEAR_RADIUS_Y, y if y != 0.0 else 1.0)
-    yaw = prng.uniform(0.0, 360.0)
-    scale = prng.uniform(*scale_range)
+placed = []   # (x, y, radius) of the props already down
+# One of each mesh first so every prop type is represented, then random fills.
+mesh_order = list(PROP_MESHES) + [prng.choice(PROP_MESHES)
+                                  for _ in range(PROP_COUNT - len(PROP_MESHES))]
+for i, (mesh_path, scale_range) in enumerate(mesh_order):
     name = mesh_path.rsplit("/", 1)[-1]
+    half = PROP_HALF_EXTENTS[name]
+
+    def draw():
+        """One seeded candidate placement, pushed clear of the camera lane."""
+        x = prng.uniform(*PROP_X)
+        y = prng.uniform(*PROP_Y)
+        lane = lane_half_width(x)
+        if abs(y) < lane:
+            y = math.copysign(lane + PROP_CLEAR_MARGIN, y if y != 0.0 else 1.0)
+        scale = prng.uniform(*scale_range)
+        return x, y, scale, max(half) * scale
+
+    def fits(cand, factor):
+        cx, cy, _, cr = cand
+        return all(math.hypot(cx - px, cy - py) >= (cr + pr) * factor
+                   for px, py, pr in placed)
+
+    chosen = None
+    for factor in (PROP_SEPARATION, PROP_SEPARATION_RELAXED):
+        for _ in range(PROP_PLACE_TRIES):
+            cand = draw()
+            if fits(cand, factor):
+                chosen = cand
+                break
+        if chosen is not None:
+            break
+    if chosen is None:
+        chosen = draw()
+        print("REEF_WARN prop %d (%s) placed without clearance" % (i, name))
+    x, y, scale, radius = chosen
+    placed.append((x, y, radius))
+    yaw = prng.uniform(0.0, 360.0)
     prop = spawn(unreal.StaticMeshActor, (x, y, FLOOR_Z), (0.0, yaw),
                  label="Prop_%02d_%s" % (i, name))
     pc = prop.static_mesh_component

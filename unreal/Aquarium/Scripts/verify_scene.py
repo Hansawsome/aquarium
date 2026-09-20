@@ -14,7 +14,8 @@ SCHOOL_SPECIES_MIN = 5
 SCHOOL_SCALE = (0.75, 1.3)
 PROP_COUNT = 14
 PROP_CLEAR_RADIUS_Y = 60.0
-PROP_CLEAR_X = 320.0
+PROP_CLEAR_TAPER = 0.10
+PROP_CLEAR_NEAR_X = 150.0
 PROP_MESH_NAMES = {"SM_BranchCoral", "SM_PlateCoral", "SM_BrainCoral",
                    "SM_boulder_01", "SM_rock_07", "SM_rock_09"}
 
@@ -105,8 +106,11 @@ for prop in props:
     assert mesh_name in PROP_MESH_NAMES, "%s uses unexpected mesh %s" % (label, mesh_name)
     prop_mesh_names.add(mesh_name)
     loc = prop.get_actor_location()
-    assert not (abs(loc.y) < PROP_CLEAR_RADIUS_Y and loc.x < PROP_CLEAR_X), \
-        "%s at (%.1f, %.1f) blocks the camera lane" % (label, loc.x, loc.y)
+    lane = PROP_CLEAR_RADIUS_Y + (loc.x - PROP_CLEAR_NEAR_X) * PROP_CLEAR_TAPER
+    assert abs(loc.y) >= lane - 1.0, \
+        "%s at (%.1f, %.1f) blocks the camera lane (half-width %.1f)" % (label, loc.x, loc.y, lane)
+assert prop_mesh_names == PROP_MESH_NAMES, \
+    "not every prop mesh is represented: %s" % sorted(PROP_MESH_NAMES - prop_mesh_names)
 
 # World settings: no per-map game mode override (project default AAquariumGameMode applies)
 world = ues.get_editor_world()
