@@ -30,6 +30,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Swim") float PlaneHalfWidth = 300.f;   // cm
 	UPROPERTY(EditAnywhere, Category = "Swim") float PlaneHalfHeight = 150.f;  // cm
 	UPROPERTY(EditAnywhere, Category = "Swim") float AvoidDistance = 50.f;
+	// Boundary band for the player-controlled fish, deliberately much narrower than AvoidDistance:
+	// the wide autonomous band makes a wander turn read as anticipation, but on a ~130 cm half-width
+	// plane it would stop a held arrow key 38% of the way in, which feels like an invisible wall.
+	UPROPERTY(EditAnywhere, Category = "Swim") float PlayerAvoidDistance = 10.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") float MaxSpeed = 40.f;          // cm/s
 	UPROPERTY(EditAnywhere, Category = "Swim") float Accel = 30.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") float Decel = 40.f;

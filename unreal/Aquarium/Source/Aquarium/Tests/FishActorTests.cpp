@@ -307,6 +307,11 @@ bool FFishActorPlayerStopsAtWall::RunTest(const FString&)
 	const FVector After = Fish->GetActorLocation();
 	TestTrue(FString::Printf(TEXT("no unforced vertical drift at the wall (max %.2f cm)"), MaxDrift), MaxDrift < 2.f);
 	TestTrue(TEXT("stays inside the plane"), FMath::Abs(After.Y - Fish->PlaneOrigin.Y) <= Fish->PlaneHalfWidth + 1.f);
+	// ...and it really reaches the edge: stopping a whole AvoidDistance short would read as an
+	// invisible wall well inside the visible plane.
+	const float DistanceFromEdge = Fish->PlaneHalfWidth - static_cast<float>(After.Y - Fish->PlaneOrigin.Y);
+	TestTrue(FString::Printf(TEXT("rides the plane edge (%.2f cm from it)"), DistanceFromEdge),
+		DistanceFromEdge <= Fish->PlayerAvoidDistance + 1.f);
 	return true;
 }
 

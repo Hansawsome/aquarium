@@ -69,8 +69,10 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	// Background: SteerAlongBoundary keeps the speed while turning along the wall, which resolves the
 	// M1/M2b follow-up where an autonomous fish stalled at a wall, let its velocity reverse through
 	// zero and snapped its facing ~180 degrees. No player is watching a specific intent there.
+	// The player also gets a much narrower band (PlayerAvoidDistance) so a held key rides the visible
+	// edge; the wide autonomous band is what makes a wander turn read as anticipation.
 	const aquarium::Vec2 Dir = bPlayerControlled
-		? aquarium::AvoidBoundary(Motion.position, Desired, Area, AvoidDistance)
+		? aquarium::AvoidBoundary(Motion.position, Desired, Area, PlayerAvoidDistance)
 		: aquarium::SteerAlongBoundary(Motion.position, Desired, Area, AvoidDistance);
 	aquarium::StepMotion(Motion, Dir, MotionParamsValue, DeltaSeconds);
 	Motion.position = aquarium::ClampToArea(Motion.position, Area);
