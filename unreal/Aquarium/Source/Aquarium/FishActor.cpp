@@ -192,11 +192,20 @@ UNameTagComponent* AFishActor::AttachNameTag(const FText& Name)
 		// tag must not inherit Body's rotation: keep it in world space and re-anchor it each tick.
 		NameTag->SetUsingAbsoluteLocation(true);
 		NameTag->SetUsingAbsoluteRotation(true);
+		// The player fish is normalized to a target length via SetActorScale3D (see
+		// AAquariumGameMode::PlayerFishTargetLengthCm), which can scale small species up nearly 4x.
+		// Without this, the tag would inherit that world scale and the Korean text would render at
+		// wildly different sizes depending on which species the session assigned.
+		NameTag->SetUsingAbsoluteScale(true);
 		NameTag->RegisterComponent();
 	}
-	// The rig origin is the body center, so the local bounds half-height is the distance to the
-	// top of the mesh (dorsal fin included). Place the tag that far plus a margin above the origin.
-	const float HalfHeight = static_cast<float>(Body->CalcBounds(FTransform::Identity).BoxExtent.Z);
+	// The rig origin is the body center, so the bounds half-height is the distance to the top of
+	// the mesh (dorsal fin included). Use the component's actual world transform (not identity) so
+	// the player-fish normalization scale (see PlayerFishTargetLengthCm) is reflected here; otherwise
+	// a scaled-up small species gets a tag placed well below the top of its actual on-screen body.
+	const float HalfHeight = static_cast<float>(Body->CalcBounds(Body->GetComponentTransform()).BoxExtent.Z);
+	// HeightMargin is a fixed world-space cm gap above the mesh, so it is added after scaling and
+	// must not itself be scaled.
 	NameTagHeight = HalfHeight + NameTag->HeightMargin;
 	UpdateNameTagLocation();
 	NameTag->SetDisplayedName(Name);

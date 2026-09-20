@@ -10,6 +10,7 @@
 #include "FishActor.h"
 #include "NameTagComponent.h"
 #include "UiFont.h"
+#include "Components/PoseableMeshComponent.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNameTagOnlyOnPlayerFish, "Aquarium.NameTag.OnlyPlayerFishHasTag", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FNameTagOnlyOnPlayerFish::RunTest(const FString&)
@@ -55,6 +56,61 @@ bool FNameTagOnlyOnPlayerFish::RunTest(const FString&)
 		}
 	}
 	TestEqual(TEXT("no tags after end"), Tags, 0);
+	return true;
+}
+
+// The player fish is normalized to PlayerFishTargetLengthCm via SetActorScale3D before the tag is
+// attached. A small species like Damselfish scales up well past 1x, so the tag placement and
+// screen-space widget must both account for (or ignore) that scale correctly.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNameTagClearsScaledBody, "Aquarium.NameTag.TagClearsScaledBody", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FNameTagClearsScaledBody::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	FActorSpawnParameters P;
+	P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AAquariumGameMode* GM = World->SpawnActor<AAquariumGameMode>(AAquariumGameMode::StaticClass(), FTransform::Identity, P);
+
+	// Single-species catalog with only the Damselfish, forcing a large upward normalization scale.
+	TArray<FFishSpecies> Catalog;
+	FFishSpecies S;
+	S.DisplayName = FText::FromString(TEXT("담셀피시"));
+	S.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/Damselfish/SK_Damselfish.SK_Damselfish")));
+	Catalog.Add(S);
+	GM->SetCatalogForTest(Catalog, 7);
+
+	TestEqual(TEXT("begin ok"), GM->BeginSession(TEXT("니모")), EBeginSessionResult::Ok);
+	AFishActor* Player = GM->PlayerFish();
+	if (!TestNotNull(TEXT("player fish"), Player))
+	{
+		return false;
+	}
+	UNameTagComponent* Tag = Player->FindComponentByClass<UNameTagComponent>();
+	if (!TestNotNull(TEXT("player has name tag"), Tag))
+	{
+		return false;
+	}
+
+	// (a) Normalization actually applied a significant scale-up for this small species.
+	const float ActorScaleZ = Player->GetActorScale3D().Z;
+	TestTrue(TEXT("actor scale is > 2 (normalization applied)"), ActorScaleZ > 2.f);
+
+	// (b) The tag must clear the SCALED body, not the unscaled local bounds. Compute the
+	// UNSCALED local half-height directly (identity transform) and multiply by the actor's scale
+	// ourselves, so this assertion is independent of whatever the production code does internally.
+	UPoseableMeshComponent* PlayerBody = Player->FindComponentByClass<UPoseableMeshComponent>();
+	if (!TestNotNull(TEXT("player body"), PlayerBody))
+	{
+		return false;
+	}
+	const float LocalHalfHeight = static_cast<float>(PlayerBody->CalcBounds(FTransform::Identity).BoxExtent.Z);
+	const float ExpectedScaledHalfHeight = LocalHalfHeight * ActorScaleZ;
+	const float TagRelativeZ = Tag->GetComponentLocation().Z - Player->GetActorLocation().Z;
+	TestTrue(TEXT("tag clears the scaled body half-height"), TagRelativeZ > ExpectedScaledHalfHeight);
+
+	// (c) The tag widget must stay screen-constant size regardless of the body's world scale.
+	TestTrue(TEXT("tag world scale is ~1 (absolute scale)"), Tag->GetComponentScale().Equals(FVector::OneVector, 0.01f));
+
+	GM->EndSession();
 	return true;
 }
 

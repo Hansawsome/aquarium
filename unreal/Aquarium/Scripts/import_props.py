@@ -1,6 +1,11 @@
 # Imports the coral props (built by assets/blender/make_corals.py) and the
 # Poly Haven CC0 rocks into /Game/Props as static meshes, with one material
-# each. Idempotent: re-running replaces the assets in place (no _1 duplicates).
+# each. Corals re-import in place safely (no _1 duplicates). Rocks are instead
+# re-created each run (the previous asset is deleted, then the new LOD0 is
+# renamed onto the target path), which breaks any level (e.g. /Game/Maps/ReefM1)
+# that already references the old rock assets. So when regenerating from
+# scratch, run this script BEFORE build_reef_m1.py — matching the order in
+# docs/SETUP.md.
 #
 # Run headless:
 #   UnrealEditor-Cmd Aquarium.uproject -run=pythonscript -script=Scripts/import_props.py
