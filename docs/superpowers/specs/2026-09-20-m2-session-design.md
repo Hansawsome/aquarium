@@ -14,6 +14,7 @@ macOS 시제품에서 PRD 경험 흐름을 완성한다: 실행 → 산호초 �
 | UI 기술 | C++ UMG — `UUserWidget` 서브클래스에서 `WidgetTree`로 위젯 구성 | 에셋 없이 재현·테스트 가능, 한글 IME는 `EditableTextBox`가 처리 |
 | 나가기 | Esc 키 + 화면 구석 반투명 작은 버튼 | 키를 모르는 아이도 나갈 수 있음 |
 | 한국어 폰트 | Noto Sans KR (SIL OFL 1.1), `assets/fonts/` 원본, 스크립트 임포트 | 무료·재배포 가능, 출처 기록 |
+| 원근 (사용자 요청 2026-09-20) | 플레이어 물고기는 카메라 앞 **2.2 m** 평면(가로 2.6 m × 세로 1.3 m, 75° FOV 안), 배경 물고기는 **3.3 m 이상**(M2b에서 3~7 m로 분산). 내 물고기가 앞에 있어 배경 물고기보다 크게 보이고, 가까울수록 커지는 원근이 자연히 적용됨 | 3D 카메라 원근을 그대로 사용; 별도 스케일 조작 없음 |
 
 검토한 대안: UMG 블루프린트 에셋(Python으로 그래프 생성이 불확실, 재현 원칙과 충돌), 순수 Slate(스타일·폰트 연결 번거로움), 같은 메시 색만 다른 2종(구별이 약함).
 
@@ -23,7 +24,7 @@ macOS 시제품에서 PRD 경험 흐름을 완성한다: 실행 → 산호초 �
 `ValidateNickname`(F-01), `PickFishIndex`(F-03), `SessionManager`(F-02, F-14). 새 규칙이 필요하면 순수 테스트를 먼저 추가한다.
 
 ### `AAquariumGameMode` (확장)
-- 보유: `aquarium::SessionManager`, `TArray<FFishSpecies> Catalog` (`DisplayName`, `USkeletalMesh*`), `FRandomStream Rng`(`Seed` 프로퍼티, 테스트에서 고정).
+- 보유: `aquarium::SessionManager`, `TArray<FFishSpecies> Catalog` (`DisplayName`, `USkeletalMesh*`), `FRandomStream Rng`(`Seed` 프로퍼티, 테스트에서 고정). 플레이어 유영 평면 기본값 `PlaneOrigin=(220,0,105)`, `PlaneHalfWidth=130`, `PlaneHalfHeight=65` (배경보다 앞).
 - `EBeginSessionResult BeginSession(const FString& RawNickname)`: `SessionManager.Begin(utf8, Catalog.Num(), pick)`에 `pick = [&](size_t n){ return Rng.RandRange(0, n-1); }` 주입 → 성공 시 플레이어 `AFishActor` 스폰(`bIsPlayerFish=true`, 배정 종 메시, 유영 평면은 배경 물고기와 같음) + `UNameTagComponent` 부착. 결과 enum은 규칙 `BeginResult`를 1:1 매핑.
 - `void EndSession()`: 플레이어 물고기 제거, `SessionManager.End()`. 배경 물고기는 유지.
 - `bool HasActiveSession()`, `FString CurrentNickname()`, `AFishActor* PlayerFish()`.
