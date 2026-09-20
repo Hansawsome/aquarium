@@ -19,6 +19,9 @@ Required call order (each step assumes the previous ones ran, object mode throug
     9. assert_rig_contract(body, arm, spine)  raises on any rig contract violation
    10. save_and_export(...)                .blend then FBX (body + armature selection only)
    11. render_preview(...)                 adds camera/sun and switches to EEVEE; run last
+
+build_species(spec) runs exactly that order from a data-only species description; the
+make_<species>.py scripts are specs plus one build_species call.
 """
 import bpy, bmesh, math, os
 
@@ -215,3 +218,119 @@ def render_preview(path, cam_loc, cam_rot, resolution=(1280, 720)):
     scene.render.resolution_x, scene.render.resolution_y = resolution
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)
+
+
+# ---------------------------------------------------------------------------
+# Procedural color-graph helpers (used by spec color_fn callbacks)
+# ---------------------------------------------------------------------------
+
+def position_axis(nt):
+    """Geometry > Position -> SeparateXYZ. World space, so the body must sit at the origin.
+    Returns the SeparateXYZ node (use .outputs["X"|"Y"|"Z"])."""
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(geo.outputs["Position"], sep.inputs[0])
+    return sep
+
+
+def axis_band_mask(nt, axis_socket, center=None, half_width=None, ramp=None,
+                   from_min=None, from_max=None, use_abs=True, invert=False):
+    """0..1 band mask along one axis, returned as a socket.
+
+    Shape by half_width/ramp: 1 inside |axis-center| <= half_width, falling to 0 at
+    half_width + ramp (an inverted MapRange, From Min > From Max).
+    Alternatively pass from_min/from_max to drive the MapRange directly, which lets a
+    caller reproduce an existing graph exactly (including ascending ramps).
+    use_abs=False skips the ABSOLUTE node (signed ramp along the axis).
+    invert=True appends a 1 - value SUBTRACT node."""
+    val = axis_socket
+    if center is not None:   # explicit 0.0 still inserts the (no-op) offset node
+        d = nt.nodes.new("ShaderNodeMath"); d.operation = 'SUBTRACT'
+        d.inputs[1].default_value = center
+        nt.links.new(val, d.inputs[0]); val = d.outputs[0]
+    if use_abs:
+        a = nt.nodes.new("ShaderNodeMath"); a.operation = 'ABSOLUTE'
+        nt.links.new(val, a.inputs[0]); val = a.outputs[0]
+    if from_min is None or from_max is None:
+        from_min = half_width + ramp
+        from_max = half_width
+    rampn = nt.nodes.new("ShaderNodeMapRange")
+    rampn.inputs["From Min"].default_value = from_min
+    rampn.inputs["From Max"].default_value = from_max
+    nt.links.new(val, rampn.inputs["Value"]); val = rampn.outputs[0]
+    if invert:
+        inv = nt.nodes.new("ShaderNodeMath"); inv.operation = 'SUBTRACT'
+        inv.inputs[0].default_value = 1.0
+        nt.links.new(val, inv.inputs[1]); val = inv.outputs[0]
+    return val
+
+
+def mix_over(nt, base, mask_socket, color):
+    """Mix RGBA: `color` laid over `base` by mask_socket. `base` is either a socket or an
+    RGBA tuple. Returns the Result socket."""
+    m = nt.nodes.new("ShaderNodeMix"); m.data_type = 'RGBA'
+    m.inputs["B"].default_value = color
+    if isinstance(base, (tuple, list)):
+        rgb = nt.nodes.new("ShaderNodeRGB"); rgb.outputs[0].default_value = base
+        nt.links.new(rgb.outputs[0], m.inputs["A"])
+    else:
+        nt.links.new(base, m.inputs["A"])
+    nt.links.new(mask_socket, m.inputs["Factor"])
+    return m.outputs["Result"]
+
+
+def pec_stray_count(body, half_len, x_min=-0.05, x_max=0.45):
+    """Diagnostic: body vertices outside the pectoral x window (fractions of half_len)
+    that are dominated (weight > 0.5) by PecL or PecR. Run after skin()."""
+    pec_gi = {body.vertex_groups[n].index for n in ("PecL", "PecR")}
+    lo, hi = half_len * x_min, half_len * x_max
+    return sum(1 for v in body.data.vertices
+               if not (lo <= v.co.x <= hi)
+               and any(g.group in pec_gi and g.weight > 0.5 for g in v.groups))
+
+
+def build_species(spec):
+    """Run the full documented pipeline for one species described as data.
+
+    Spec keys: name, body=(len, h, w, taper_z, taper_y), fin_thickness,
+    fins=[(fin_name, verts_fn(ctx), faces)], color_fn(nt, bsdf, ctx),
+    rig=dict(pec_z, tail_tip_x, pec_span_y, pec_drop_z), spine (6),
+    cam_loc, cam_rot ((1.35, 0, 0.42)), root_dir, export_dir, texture_size (2048),
+    preview_name (preview_<name.lower()>.png), pec_window ((-0.05, 0.45)).
+    ctx = {"L", "BODY_H", "BODY_W", "PEC_ROOT_Y", "body_h"}.
+    Returns dict(verts, bones, unweighted, root_max_w, pec_stray)."""
+    name = spec["name"]
+    body_len, body_h_, body_w, taper_z, taper_y = spec["body"]
+    L = body_len / 2
+    pec_root_y = body_w * 0.45
+    spine = spec.get("spine", 6)
+    export_dir = spec["export_dir"]
+    os.makedirs(export_dir, exist_ok=True)
+    ctx = {"L": L, "BODY_H": body_h_, "BODY_W": body_w, "PEC_ROOT_Y": pec_root_y,
+           "body_h": lambda x: body_half_height(x, L, body_h_, taper_z)}
+
+    reset_scene()
+    body = build_body(name, body_len, body_h_, body_w, taper_z=taper_z, taper_y=taper_y)
+    thickness = spec.get("fin_thickness", 0.25)
+    fins = [add_fin(fname, verts_fn(ctx), faces, thickness=thickness)
+            for fname, verts_fn, faces in spec["fins"]]
+    join_fins(body, fins)
+    unwrap(body)
+    color_fn = spec["color_fn"]
+    bake_base_color(body, "M_" + name, lambda nt, bsdf: color_fn(nt, bsdf, ctx),
+                    "T_%s_BaseColor" % name, export_dir, size=spec.get("texture_size", 2048))
+    rig = spec["rig"]
+    arm = build_rig(name + "Rig", L, pec_root_y, pec_z=rig["pec_z"], spine=spine,
+                    tail_tip_x=rig.get("tail_tip_x"), pec_span_y=rig["pec_span_y"],
+                    pec_drop_z=rig["pec_drop_z"])
+    skin(body, arm)
+    unweighted, root_max_w = assert_rig_contract(body, arm, spine)
+    x_min, x_max = spec.get("pec_window", (-0.05, 0.45))
+    pec_stray = pec_stray_count(body, L, x_min, x_max)
+    save_and_export(body, arm, os.path.join(spec["root_dir"], name + ".blend"),
+                    os.path.join(export_dir, name + ".fbx"))
+    preview = spec.get("preview_name", "preview_%s.png" % name.lower())
+    render_preview(os.path.join(export_dir, preview), spec["cam_loc"],
+                   spec.get("cam_rot", (1.35, 0, 0.42)))
+    return dict(verts=len(body.data.vertices), bones=len(arm.data.bones),
+                unweighted=unweighted, root_max_w=root_max_w, pec_stray=pec_stray)

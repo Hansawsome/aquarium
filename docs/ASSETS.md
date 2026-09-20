@@ -16,7 +16,7 @@
 | 블루탱 (BlueTang) | Blender 5.2.2 LTS | `assets/blender/make_bluetang.py` | `assets/blender/BlueTang.blend`, `assets/blender/export/BlueTang.fbx`, `T_BlueTang_BaseColor.png` (2048², 절차적 노드 베이크) | 없음 |
 | 흰동가리돔 (Clownfish) | Blender 5.2.2 LTS | `assets/blender/make_clownfish.py` (+ `fishlib.py`) | `assets/blender/Clownfish.blend`, `assets/blender/export/Clownfish.fbx`, `T_Clownfish_BaseColor.png` (2048², 절차적 베이크), `preview_clownfish.png` | 없음 |
 
-블루탱 비고: `assets/blender/export/preview.png`(EEVEE 미리보기 렌더)도 스크립트 산출물이다. `.blend`/`.fbx`/`preview.png`는 재빌드마다 바이트가 달라진다(타임스탬프·세션 데이터, EEVEE 노이즈). 베이크된 `T_BlueTang_BaseColor.png`는 바이트 동일하다. Subdivision 모디파이어는 의도적으로 생략했다(shade_smooth만 적용).
+블루탱 비고: `assets/blender/export/preview_bluetang.png`(EEVEE 미리보기 렌더)도 스크립트 산출물이다. `.blend`/`.fbx`/`preview_bluetang.png`는 재빌드마다 바이트가 달라진다(타임스탬프·세션 데이터, EEVEE 노이즈). 베이크된 `T_BlueTang_BaseColor.png`는 바이트 동일하다. Subdivision 모디파이어는 의도적으로 생략했다(shade_smooth만 적용).
 
 ## 도입 시 필수 기록
 
