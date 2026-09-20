@@ -20,6 +20,21 @@ AAquariumGameMode::AAquariumGameMode()
 	Clownfish.DisplayName = NSLOCTEXT("Aquarium", "SpeciesClownfish", "흰동가리");
 	Clownfish.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/Clownfish/SK_Clownfish.SK_Clownfish")));
 	Catalog.Add(Clownfish);
+
+	FFishSpecies YellowTang;
+	YellowTang.DisplayName = NSLOCTEXT("Aquarium", "SpeciesYellowTang", "노란탱");
+	YellowTang.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/YellowTang/SK_YellowTang.SK_YellowTang")));
+	Catalog.Add(YellowTang);
+
+	FFishSpecies Butterflyfish;
+	Butterflyfish.DisplayName = NSLOCTEXT("Aquarium", "SpeciesButterflyfish", "나비고기");
+	Butterflyfish.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/Butterflyfish/SK_Butterflyfish.SK_Butterflyfish")));
+	Catalog.Add(Butterflyfish);
+
+	FFishSpecies Damselfish;
+	Damselfish.DisplayName = NSLOCTEXT("Aquarium", "SpeciesDamselfish", "담셀피시");
+	Damselfish.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/Damselfish/SK_Damselfish.SK_Damselfish")));
+	Catalog.Add(Damselfish);
 }
 
 void AAquariumGameMode::BeginPlay()

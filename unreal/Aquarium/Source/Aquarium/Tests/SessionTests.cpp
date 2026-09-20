@@ -30,6 +30,27 @@ AAquariumGameMode* SpawnGameMode(UWorld* World, int32 Seed, int32 SpeciesCount)
 		S.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/Clownfish/SK_Clownfish.SK_Clownfish")));
 		Catalog.Add(S);
 	}
+	if (SpeciesCount >= 3)
+	{
+		FFishSpecies S;
+		S.DisplayName = FText::FromString(TEXT("노란탱"));
+		S.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/YellowTang/SK_YellowTang.SK_YellowTang")));
+		Catalog.Add(S);
+	}
+	if (SpeciesCount >= 4)
+	{
+		FFishSpecies S;
+		S.DisplayName = FText::FromString(TEXT("나비고기"));
+		S.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/Butterflyfish/SK_Butterflyfish.SK_Butterflyfish")));
+		Catalog.Add(S);
+	}
+	if (SpeciesCount >= 5)
+	{
+		FFishSpecies S;
+		S.DisplayName = FText::FromString(TEXT("담셀피시"));
+		S.Mesh = TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Fish/Damselfish/SK_Damselfish.SK_Damselfish")));
+		Catalog.Add(S);
+	}
 	GM->SetCatalogForTest(Catalog, Seed);
 	return GM;
 }
@@ -96,21 +117,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionSeedDeterminesSpecies, "Aquarium.Sessio
 bool FSessionSeedDeterminesSpecies::RunTest(const FString&)
 {
 	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
-	AAquariumGameMode* A = SpawnGameMode(World, 42, 2);
-	AAquariumGameMode* B = SpawnGameMode(World, 42, 2);
+	AAquariumGameMode* A = SpawnGameMode(World, 42, 5);
+	AAquariumGameMode* B = SpawnGameMode(World, 42, 5);
 	A->BeginSession(TEXT("니모"));
 	B->BeginSession(TEXT("니모"));
 	TestEqual(TEXT("same species index"), A->AssignedSpeciesIndex(), B->AssignedSpeciesIndex());
-	TestEqual(TEXT("both meshes loaded"), A->LoadedSpeciesCount(), 2);
-	bool Saw0 = false, Saw1 = false;
-	for (int32 Seed = 1; Seed <= 40; ++Seed)
+	TestEqual(TEXT("five species loaded"), A->LoadedSpeciesCount(), 5);
+	TSet<int32> Seen;
+	for (int32 Seed = 1; Seed <= 60; ++Seed)
 	{
-		AAquariumGameMode* G = SpawnGameMode(World, Seed, 2);
+		AAquariumGameMode* G = SpawnGameMode(World, Seed, 5);
 		G->BeginSession(TEXT("x"));
-		if (G->AssignedSpeciesIndex() == 0) { Saw0 = true; }
-		if (G->AssignedSpeciesIndex() == 1) { Saw1 = true; }
+		Seen.Add(G->AssignedSpeciesIndex());
 	}
-	TestTrue(TEXT("both species reachable"), Saw0 && Saw1);
+	for (int32 Index = 0; Index < 5; ++Index)
+	{
+		TestTrue(FString::Printf(TEXT("species index %d reachable"), Index), Seen.Contains(Index));
+	}
 	return true;
 }
 

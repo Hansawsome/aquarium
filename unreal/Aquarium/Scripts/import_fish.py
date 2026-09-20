@@ -1,7 +1,7 @@
 # Imports a fish species' FBX + base color texture into /Game/Fish/<name> and
 # builds M_<name>. Idempotent: re-running replaces the existing assets.
 #
-# Run headless (defaults to BlueTang + Clownfish):
+# Run headless (defaults to BlueTang + Clownfish + YellowTang + Butterflyfish + Damselfish):
 #   UnrealEditor-Cmd Aquarium.uproject -run=pythonscript -script=Scripts/import_fish.py
 #
 # Select species explicitly, either via a script argument:
@@ -165,6 +165,6 @@ import sys
 names = [a.split("=", 1)[1] for a in sys.argv if a.startswith("species=")]
 if not names:
     env_species = os.environ.get("AQUARIUM_SPECIES")
-    names = [env_species] if env_species else ["BlueTang", "Clownfish"]
+    names = [env_species] if env_species else ["BlueTang", "Clownfish", "YellowTang", "Butterflyfish", "Damselfish"]
 for n in names:
     import_species(n)
