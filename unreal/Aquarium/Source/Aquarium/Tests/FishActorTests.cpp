@@ -283,4 +283,31 @@ bool FFishActorBackgroundIgnoresInput::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorPlayerStopsAtWall, "Aquarium.Fish.PlayerStopsAtWallWithoutDrift", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorPlayerStopsAtWall::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnFish(World, 7u);
+	Fish->bPlayerControlled = true;
+	// Swim up and to the right first so the fish sits off-centre vertically when it meets the wall:
+	// that is the M3 capture case, where the boundary steering has a centre to aim back at.
+	Fish->SetInputDirection(FVector2D(0.7071f, 0.7071f));
+	for (int i = 0; i < 80; ++i) Fish->StepSwim(0.05f);
+	// Now hold "screen right" alone, long enough to reach and settle against the right wall.
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));
+	for (int i = 0; i < 120; ++i) Fish->StepSwim(0.05f);
+	const FVector Settled = Fish->GetActorLocation();
+	// Keep holding: the fish must not acquire vertical motion it was never asked for.
+	float MaxDrift = 0.f;
+	for (int i = 0; i < 100; ++i)
+	{
+		Fish->StepSwim(0.05f);
+		MaxDrift = FMath::Max(MaxDrift, FMath::Abs(Fish->GetActorLocation().Z - Settled.Z));
+	}
+	const FVector After = Fish->GetActorLocation();
+	TestTrue(FString::Printf(TEXT("no unforced vertical drift at the wall (max %.2f cm)"), MaxDrift), MaxDrift < 2.f);
+	TestTrue(TEXT("stays inside the plane"), FMath::Abs(After.Y - Fish->PlaneOrigin.Y) <= Fish->PlaneHalfWidth + 1.f);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

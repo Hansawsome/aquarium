@@ -62,10 +62,16 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	Wander->Update(Motion.position, DeltaSeconds);
 	// Player input replaces the wander target entirely; a zero input coasts the fish to a stop.
 	const aquarium::Vec2 Desired = bPlayerControlled ? InputDirection : Wander->DesiredDirection(Motion.position);
-	// SteerAlongBoundary instead of AvoidBoundary: background fish now slide along the walls too,
-	// which resolves the M1/M2b follow-up where a fish stalled at a wall, let its velocity reverse
-	// through zero and snapped its facing ~180 degrees.
-	const aquarium::Vec2 Dir = aquarium::SteerAlongBoundary(Motion.position, Desired, Area, AvoidDistance);
+	// The two boundary rules are deliberately different for the player and for background fish.
+	// Player: AvoidBoundary only cancels the outward component, so pushing into a wall simply stops
+	// the fish. Sliding would add motion along the wall that the child never asked for (holding Left
+	// at the left edge drifted vertically in the M3 capture).
+	// Background: SteerAlongBoundary keeps the speed while turning along the wall, which resolves the
+	// M1/M2b follow-up where an autonomous fish stalled at a wall, let its velocity reverse through
+	// zero and snapped its facing ~180 degrees. No player is watching a specific intent there.
+	const aquarium::Vec2 Dir = bPlayerControlled
+		? aquarium::AvoidBoundary(Motion.position, Desired, Area, AvoidDistance)
+		: aquarium::SteerAlongBoundary(Motion.position, Desired, Area, AvoidDistance);
 	aquarium::StepMotion(Motion, Dir, MotionParamsValue, DeltaSeconds);
 	Motion.position = aquarium::ClampToArea(Motion.position, Area);
 
