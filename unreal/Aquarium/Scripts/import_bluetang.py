@@ -78,6 +78,9 @@ mel.connect_material_property(node, "RGB", unreal.MaterialProperty.MP_BASE_COLOR
 rough = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -400, 300)
 rough.set_editor_property("r", 0.35)
 mel.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+# Required so the material is actually used on SK_BlueTang in -game (otherwise
+# the engine falls back to the default material at runtime).
+mat.set_editor_property("used_with_skeletal_mesh", True)
 mel.recompile_material(mat)
 eal.save_loaded_asset(mat)
 

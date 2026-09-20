@@ -62,6 +62,9 @@ if (( COUNT < FPS * SECONDS_TO_RUN - FPS )); then
   exit 1
 fi
 
-"$FFMPEG" -y -loglevel error -framerate "$FPS" -pattern_type glob -i "$FRAMES/MovieFrame*.png" \
+# Skip the first SKIP_FRAMES frames: exposure and streaming settle during the
+# first couple of ticks, so the head of the clip would otherwise be blown out.
+SKIP_FRAMES="${SKIP_FRAMES:-15}"
+"$FFMPEG" -y -loglevel error -framerate "$FPS" -start_number "$SKIP_FRAMES" -i "$FRAMES/MovieFrame%05d.png" \
   -c:v libx264 -pix_fmt yuv420p -crf 18 "$OUT"
-echo "VIDEO_OK $OUT frames=$COUNT"
+echo "VIDEO_OK $OUT frames=$(( COUNT - SKIP_FRAMES )) (skipped first $SKIP_FRAMES of $COUNT)"
