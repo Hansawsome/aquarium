@@ -7,3 +7,4 @@ unreal/**/.vs/
 unreal/**/*.xcworkspace/
 *.blend1
 .DS_Store
+__pycache__/
