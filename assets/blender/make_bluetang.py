@@ -8,7 +8,7 @@
 # Conventions (must match the Unreal import side):
 #   +X = head, -X = tail, +Z = up, 1 unit = 1 cm, body length ~25 cm.
 #   Bones: Root, Spine0..Spine5, Tail, PecL, PecR (exactly these names).
-import math, os, sys
+import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fishlib as F
@@ -25,15 +25,15 @@ BODY_W = 3.0
 L = BODY_LEN / 2
 PEC_ROOT_Y = BODY_W * 0.45   # lateral offset where pectoral fin plates and PecL/PecR bones attach
 SPINE = 6
+TAPER_Z = 0.55   # tail taper of the hull height; shared by build_body and body_h below
 
 # ---------- body ----------
-body = F.build_body("BlueTang", BODY_LEN, BODY_H, BODY_W, taper_z=0.55, taper_y=0.4)
+body = F.build_body("BlueTang", BODY_LEN, BODY_H, BODY_W, taper_z=TAPER_Z, taper_y=0.4)
 
 # ---------- fins (flat plates joined to body) ----------
 def body_h(x):
     """Half-height of the (tapered) body at x, used to sink fin roots into the hull."""
-    t = max(0.0, -x / L)
-    return (BODY_H / 2) * math.sqrt(max(0.0, 1.0 - (x / L) ** 2)) * (1.0 - 0.55 * t * t)
+    return F.body_half_height(x, L, BODY_H, TAPER_Z)
 
 tail = F.add_fin("TailFin",
     [(-L + 1, 0, 2.5), (-L - 7, 0, 5.5), (-L - 6, 0, 0), (-L - 7, 0, -5.5), (-L + 1, 0, -2.5)],
@@ -93,11 +93,11 @@ def bluetang_color(nt, bsdf):
 F.bake_base_color(body, "M_BlueTang", bluetang_color, "T_BlueTang_BaseColor", EXPORT)
 
 # ---------- armature + skinning ----------
-arm = F.build_rig("BlueTangRig", L, PEC_ROOT_Y, pec_z=0.5, spine=SPINE)
+arm = F.build_rig("BlueTangRig", L, PEC_ROOT_Y, pec_z=0.5, spine=SPINE, pec_span_y=4.0, pec_drop_z=2.5)
 F.skin(body, arm)
 
 # ---------- rig contract guards ----------
-unweighted, root_max_w = F.assert_rig_contract(body, arm, spine=SPINE)
+unweighted, root_max_w = F.assert_rig_contract(body, arm, SPINE)
 
 # ---------- save + export ----------
 F.save_and_export(body, arm, os.path.join(ROOT, "BlueTang.blend"), os.path.join(EXPORT, "BlueTang.fbx"))
