@@ -5,6 +5,7 @@
 #include "HudWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "TimerManager.h"
@@ -16,6 +17,8 @@ namespace
 	constexpr int32 kHudZOrder = 5;
 	// Delay before the dev-only auto submit so the scene and fonts are on screen first.
 	constexpr float kAutoSubmitDelay = 2.f;
+	// Upper bound on the dev-only frame-time buffer (about 55 minutes at 60 fps).
+	constexpr int32 kMaxFrameSamples = 200000;
 }
 
 ADiverPlayerController::ADiverPlayerController()
@@ -58,6 +61,7 @@ void ADiverPlayerController::BeginPlay()
 	ApplyAssignmentSeedIfRequested();
 	StartAutoReplayIfRequested();
 	StartUiCaptureIfRequested();
+	StartFrameStatsIfRequested();
 }
 
 void ADiverPlayerController::Tick(float DeltaSeconds)
@@ -73,6 +77,10 @@ void ADiverPlayerController::Tick(float DeltaSeconds)
 			FString::Printf(TEXT("%s/UiFrame%05d.png"), *UiCaptureDir, UiCaptureFrame++),
 			/*bShowUI*/ true, /*bAddFilenameSuffix*/ false);
 	}
+	if (!FrameStatsPath.IsEmpty() && FrameDeltas.Num() < kMaxFrameSamples)
+	{
+		FrameDeltas.Add(DeltaSeconds);
+	}
 #endif
 }
 
@@ -83,6 +91,9 @@ void ADiverPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		World->GetTimerManager().ClearTimer(AutoSubmitTimer);
 		World->GetTimerManager().ClearTimer(AutoExitTimer);
 	}
+#if !UE_BUILD_SHIPPING
+	WriteFrameStats();
+#endif
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -282,5 +293,57 @@ void ADiverPlayerController::ApplyAssignmentSeedIfRequested()
 	{
 		GM->SetAssignmentSeed(Seed);
 	}
+#endif
+}
+
+bool ADiverPlayerController::ParseFrameStatsPath(const TCHAR* CmdLine, FString& OutPath)
+{
+	OutPath.Reset();
+	if (!CmdLine || !FParse::Value(CmdLine, TEXT("-AquariumFrameStats="), OutPath))
+	{
+		return false;
+	}
+	OutPath.TrimStartAndEndInline();
+	return !OutPath.IsEmpty();
+}
+
+void ADiverPlayerController::StartFrameStatsIfRequested()
+{
+#if !UE_BUILD_SHIPPING
+	// Dev-only: records one DeltaSeconds per tick and dumps them as CSV on EndPlay, so a
+	// performance run can be analysed offline. Only timings are written, never a nickname.
+	FString Path;
+	if (!ParseFrameStatsPath(FCommandLine::Get(), Path))
+	{
+		return;
+	}
+	FrameStatsPath = Path;
+	FrameDeltas.Reset();
+	FrameDeltas.Reserve(kMaxFrameSamples);
+#endif
+}
+
+void ADiverPlayerController::WriteFrameStats()
+{
+#if !UE_BUILD_SHIPPING
+	if (FrameStatsPath.IsEmpty())
+	{
+		return;
+	}
+	FString Csv = TEXT("frame,delta_seconds\n");
+	for (int32 Index = 0; Index < FrameDeltas.Num(); ++Index)
+	{
+		Csv += FString::Printf(TEXT("%d,%.6f\n"), Index, FrameDeltas[Index]);
+	}
+	if (FFileHelper::SaveStringToFile(Csv, *FrameStatsPath))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AquariumFrameStats: wrote %d samples to %s"), FrameDeltas.Num(), *FrameStatsPath);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AquariumFrameStats: cannot write %s"), *FrameStatsPath);
+	}
+	FrameStatsPath.Reset();
+	FrameDeltas.Empty();
 #endif
 }

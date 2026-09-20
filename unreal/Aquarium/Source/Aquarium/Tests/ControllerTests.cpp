@@ -74,4 +74,23 @@ bool FControllerAssignmentSeed::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FControllerFrameStatsPath, "Aquarium.Controller.ParsesFrameStatsPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FControllerFrameStatsPath::RunTest(const FString&)
+{
+	FString Path;
+	TestTrue(TEXT("parses"), ADiverPlayerController::ParseFrameStatsPath(TEXT("-game -AquariumFrameStats=/tmp/x.csv -unattended"), Path));
+	TestEqual(TEXT("path"), Path, FString(TEXT("/tmp/x.csv")));
+
+	TestTrue(TEXT("quoted path with space"), ADiverPlayerController::ParseFrameStatsPath(TEXT("-AquariumFrameStats=\"/a b/frames.csv\""), Path));
+	TestEqual(TEXT("quoted path"), Path, FString(TEXT("/a b/frames.csv")));
+
+	TestFalse(TEXT("absent"), ADiverPlayerController::ParseFrameStatsPath(TEXT("-AquariumAutoNickname=x"), Path));
+	TestTrue(TEXT("cleared"), Path.IsEmpty());
+	TestFalse(TEXT("empty value"), ADiverPlayerController::ParseFrameStatsPath(TEXT("-AquariumFrameStats="), Path));
+	TestFalse(TEXT("null"), ADiverPlayerController::ParseFrameStatsPath(nullptr, Path));
+	return true;
+}
+
 #endif

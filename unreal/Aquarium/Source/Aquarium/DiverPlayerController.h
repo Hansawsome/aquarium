@@ -32,6 +32,9 @@ public:
 	static bool ParseUiCaptureDir(const TCHAR* CmdLine, FString& OutDir);
 	// Parses -AquariumAssignmentSeed=<int>; false when absent, non-numeric or 0.
 	static bool ParseAssignmentSeed(const TCHAR* CmdLine, int32& OutSeed);
+	// Parses -AquariumFrameStats=<absolute csv path>; false when absent or empty. Dev-only
+	// per-frame delta time recording, written out as CSV on EndPlay.
+	static bool ParseFrameStatsPath(const TCHAR* CmdLine, FString& OutPath);
 
 protected:
 	virtual void BeginPlay() override;
@@ -50,7 +53,12 @@ private:
 	void StartAutoReplayIfRequested();
 	void StartUiCaptureIfRequested();
 	void ApplyAssignmentSeedIfRequested();
+	void StartFrameStatsIfRequested();
+	void WriteFrameStats();
 	// Non-empty while the dev-only UI capture is active; one screenshot request per tick.
 	FString UiCaptureDir;
 	int32 UiCaptureFrame = 0;
+	// Non-empty while the dev-only frame-time recording is active; one DeltaSeconds per tick.
+	FString FrameStatsPath;
+	TArray<float> FrameDeltas;
 };
