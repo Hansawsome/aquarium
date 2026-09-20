@@ -16,14 +16,61 @@ SAND_DIR = os.path.join(ROOT, "assets", "textures", "sand")
 ENV = "/Game/Env"
 MAP = "/Game/Maps/ReefM1"
 FISH_MESH = "/Game/Fish/BlueTang/SK_BlueTang"
+FISH_CLASS = "/Script/Aquarium.FishActor"
+ENGINE_PLANE = "/Engine/BasicShapes/Plane"                          # 100 x 100 cm, +Z normal
+ENGINE_SKY_CUBEMAP = "/Engine/MapTemplates/Sky/DaylightAmbientCubemap"
 
-# Scene layout (cm). Camera at diver eye height looking along +X; the fish
-# swims on a YZ plane in front of it so it is seen side-on.
+# --- tuning ------------------------------------------------------------------
+# Units: cm, degrees, lux (sun) / cd/m^2 (sky). Auto exposure is disabled in
+# this project (r.DefaultFeature.AutoExposure=False), so brightness is absolute.
+#
+# Camera at diver eye height looking along +X; the fish swims on a YZ plane in
+# front of it so it is seen side-on.
 CAM_LOC = (0.0, 0.0, 130.0)
-CAM_ROT = (-4.0, 0.0)           # pitch, yaw
-SUN_ROT = (-65.0, 30.0)         # pitch, yaw
+CAM_ROT = (-4.0, 0.0)                   # pitch, yaw
+CAM_FOV = 75.0
+# Swim plane: 4 x 2 m centred 3.3 m ahead. This deviates from the spec's
+# 6 x 3 m because at 3.3 m the 75 deg FOV only spans ~4.9 m; a 6 m plane would
+# let the fish wander out of frame.
 FISH_ORIGIN = (330.0, 0.0, 110.0)
-FISH_HALF_W, FISH_HALF_H = 200.0, 100.0   # wander extents stay inside the 75 deg FOV
+FISH_HALF_W, FISH_HALF_H = 200.0, 100.0
+FISH_SEED = 7
+FISH_EDITOR_YAW = 90.0                  # side-on in editor stills; runtime facing follows velocity
+
+FLOOR_Z = 1.0                           # above the editor grid (z=0) so captures do not z-fight
+FLOOR_SCALE = 40.0                      # 100 cm plane -> 40 m
+SAND_TILING = 25.0                      # tiles across the floor -> one tile per ~1.6 m
+
+SUN_ROT = (-65.0, 30.0)                 # pitch, yaw
+SUN_INTENSITY = 14.0                   # light function peaks at 1.0, so the sun carries brightness
+SUN_COLOR = dict(r=0.55, g=0.85, b=1.0)
+SUN_VOLUMETRIC_SCATTERING = 8.0         # drives the light shafts
+
+SKY_INTENSITY = 0.8
+SKY_COLOR = dict(r=0.35, g=0.65, b=0.9)
+SKY_VOLUMETRIC_SCATTERING = 0.5
+
+# Measured in-editor: density 1.5 barely tints the floor at 20 m; 5.0 gives
+# ~40% haze on the fish at 3.3 m and a fully fogged background by ~15 m.
+# Falloff 0 = uniform density (we are inside the water).
+FOG_DENSITY = 5.0
+FOG_HEIGHT_FALLOFF = 0.0
+FOG_INSCATTER = dict(r=0.02, g=0.18, b=0.30)            # far background colour
+FOG_DIRECTIONAL_INSCATTER = dict(r=0.10, g=0.35, b=0.45)
+FOG_ALBEDO = dict(r=30, g=140, b=200, a=255)            # volumetric scattering tint (8-bit)
+FOG_SCATTERING_DISTRIBUTION = 0.6
+FOG_EXTINCTION_SCALE = 1.0
+FOG_VOLUMETRIC_DISTANCE = 6000.0
+
+# Caustics: (period cm, direction deg, drift turns/s). Directions are chosen so
+# no pair is within 30 deg of parallel or anti-parallel; periods are
+# non-commensurate. Each wave's phase is warped by the previous wave's sine.
+CAUSTIC_WAVES = [(52.0, 12.0, 0.11), (67.0, 71.0, -0.08), (89.0, 128.0, 0.14), (113.0, 160.0, -0.06)]
+CAUSTIC_WARP = 2.0                      # phase warp amplitude, radians
+CAUSTIC_SHARPEN = 6.0                   # power applied to the normalised sum
+CAUSTIC_GAIN = 0.7                      # output = pow * GAIN + LIFT, kept within [0, 1]
+CAUSTIC_LIFT = 0.3
+# -----------------------------------------------------------------------------
 
 eal = unreal.EditorAssetLibrary
 tools = unreal.AssetToolsHelpers.get_asset_tools()
@@ -79,19 +126,12 @@ def material(name):
     return m
 
 
-def const(m, x, y, value):
-    n = mel.create_material_expression(m, unreal.MaterialExpressionConstant, x, y)
-    n.set_editor_property("r", value)
-    return n
-
-
 # Sand: tiled diffuse / normal / roughness.
 m_sand = material("M_Sand")
 m_sand.set_editor_property("material_domain", unreal.MaterialDomain.MD_SURFACE)
 coord = mel.create_material_expression(m_sand, unreal.MaterialExpressionTextureCoordinate, -900, 0)
-# The floor plane is 100 cm scaled x40 = 40 m; one sand tile per ~1.6 m.
-coord.set_editor_property("u_tiling", 25.0)
-coord.set_editor_property("v_tiling", 25.0)
+coord.set_editor_property("u_tiling", SAND_TILING)
+coord.set_editor_property("v_tiling", SAND_TILING)
 
 
 def sample(tex, y, sampler=None):
@@ -111,58 +151,84 @@ mel.connect_material_property(sample(rough, 400, unreal.MaterialSamplerType.SAMP
 mel.recompile_material(m_sand)
 eal.save_loaded_asset(m_sand)
 
+
 # Caustics light function. Note: MaterialExpressionNoise produced a flat result
 # in the light-function domain on this setup, so the pattern is analytic.
 def build_caustics(m):
-    """Light function: three drifting sine waves over world XY, summed, sharpened.
-    Bright ridges read as moving caustic patches; the lift keeps shadows from
-    going fully black. Output roughly 0.25 .. 2.25."""
-    E = unreal.MaterialProperty
+    """Light function: four drifting sine waves over world XY, each phase-warped
+    by the previous wave (sin(k2.p + d2.t + A*sin(k1.p + d1.t))), summed,
+    normalised to [0, 1] and sharpened with a power curve. Bright ridges read
+    as wobbly caustic patches; the lift keeps shadows from going fully black.
+    Output range is [CAUSTIC_LIFT, CAUSTIC_LIFT + CAUSTIC_GAIN] = [0.3, 1.0];
+    the sun intensity carries the brightness."""
     def node(cls, x, y):
         return mel.create_material_expression(m, cls, x, y)
+
     def const(x, y, v):
-        n = node(unreal.MaterialExpressionConstant, x, y); n.set_editor_property("r", v); return n
+        n = node(unreal.MaterialExpressionConstant, x, y)
+        n.set_editor_property("r", v)
+        return n
+
     def mask(src, x, y, r, g):
         n = node(unreal.MaterialExpressionComponentMask, x, y)
-        n.set_editor_property("r", r); n.set_editor_property("g", g)
-        n.set_editor_property("b", False); n.set_editor_property("a", False)
-        mel.connect_material_expressions(src, "", n, ""); return n
-    def mul(a, b, x, y, a_out="", b_out=""):
+        n.set_editor_property("r", r)
+        n.set_editor_property("g", g)
+        n.set_editor_property("b", False)
+        n.set_editor_property("a", False)
+        mel.connect_material_expressions(src, "", n, "")
+        return n
+
+    def mul(a, b, x, y):
         n = node(unreal.MaterialExpressionMultiply, x, y)
-        mel.connect_material_expressions(a, a_out, n, "A"); mel.connect_material_expressions(b, b_out, n, "B"); return n
+        mel.connect_material_expressions(a, "", n, "A")
+        mel.connect_material_expressions(b, "", n, "B")
+        return n
+
     def add(a, b, x, y):
         n = node(unreal.MaterialExpressionAdd, x, y)
-        mel.connect_material_expressions(a, "", n, "A"); mel.connect_material_expressions(b, "", n, "B"); return n
-    def sine(src, x, y):
-        n = node(unreal.MaterialExpressionSine, x, y)
-        mel.connect_material_expressions(src, "", n, ""); return n
+        mel.connect_material_expressions(a, "", n, "A")
+        mel.connect_material_expressions(b, "", n, "B")
+        return n
 
-    wpos = node(unreal.MaterialExpressionWorldPosition, -1800, 0)
-    px = mask(wpos, -1600, -100, True, False)   # world X (cm)
-    py = mask(wpos, -1600, 100, False, True)    # world Y (cm)
-    t = node(unreal.MaterialExpressionTime, -1600, 300)
-    # Wave phases: k * axis + drift * time. Sine node period=1 -> sin(2*pi*x),
-    # so k = 1/period_cm. Periods ~45-70 cm give hand-sized patches.
+    def sine(src, x, y):
+        n = node(unreal.MaterialExpressionSine, x, y)   # period 1 -> sin(2*pi*x)
+        mel.connect_material_expressions(src, "", n, "")
+        return n
+
+    wpos = node(unreal.MaterialExpressionWorldPosition, -2000, 0)
+    px = mask(wpos, -1800, -100, True, False)   # world X (cm)
+    py = mask(wpos, -1800, 100, False, True)    # world Y (cm)
+    t = node(unreal.MaterialExpressionTime, -1800, 300)
+    # Sine input is in turns, so k = 1/period_cm and the warp amplitude is
+    # converted from radians to turns.
+    warp_turns = CAUSTIC_WARP / (2.0 * math.pi)
+    prev = None
     waves = []
-    # Four waves with non-commensurate wavelengths and directions so the sum
-    # never settles into a visible lattice.
-    for i, (period, angle, drift) in enumerate([(52.0, 12.0, 0.11), (67.0, 71.0, -0.08), (89.0, 137.0, 0.14), (113.0, 203.0, -0.06)]):
-        y = -400 + i * 220
+    for i, (period, angle, drift) in enumerate(CAUSTIC_WAVES):
+        y = -450 + i * 220
         kx = math.cos(math.radians(angle)) / period
         ky = math.sin(math.radians(angle)) / period
-        ax = mul(px, const(-1400, y - 60, kx), -1250, y - 60)
-        ay = mul(py, const(-1400, y, ky), -1250, y)
-        at = mul(t, const(-1400, y + 60, drift), -1250, y + 60)
-        waves.append(sine(add(add(ax, ay, -1100, y), at, -950, y), -800, y))
-    s = add(add(add(waves[0], waves[1], -700, -100), waves[2], -600, -100), waves[3], -500, -100)
-    # Normalize sum of four sines (-4..4) to 0..1, then sharpen.
-    n = add(mul(s, const(-500, 100, 1 / 8.0), -350, -100), const(-350, 100, 0.5), -200, -100)
-    sat = node(unreal.MaterialExpressionSaturate, -50, -100)
-    mel.connect_material_expressions(n, "", sat, "")
-    pw = node(unreal.MaterialExpressionPower, 100, -100)
-    mel.connect_material_expressions(sat, "", pw, "Base"); mel.connect_material_expressions(const(-50, 100, 6.0), "", pw, "Exp")
-    out = add(mul(pw, const(100, 100, 2.5), 250, -100), const(250, 100, 0.3), 400, -100)
-    mel.connect_material_property(out, "", E.MP_EMISSIVE_COLOR)
+        ax = mul(px, const(-1600, y - 60, kx), -1450, y - 60)
+        ay = mul(py, const(-1600, y, ky), -1450, y)
+        at = mul(t, const(-1600, y + 60, drift), -1450, y + 60)
+        phase = add(add(ax, ay, -1300, y), at, -1150, y)
+        if prev is not None:
+            phase = add(phase, mul(prev, const(-1150, y + 90, warp_turns), -1000, y + 60), -850, y)
+        prev = sine(phase, -700, y)
+        waves.append(prev)
+    s = waves[0]
+    for i, w in enumerate(waves[1:]):
+        s = add(s, w, -550 + i * 100, -100)
+    # Normalise the sum of N sines (-N..N) to 0..1, clamp, then sharpen.
+    n_waves = float(len(waves))
+    norm = add(mul(s, const(-250, 100, 1.0 / (2.0 * n_waves)), -150, -100), const(-150, 100, 0.5), -50, -100)
+    sat = node(unreal.MaterialExpressionSaturate, 50, -100)
+    mel.connect_material_expressions(norm, "", sat, "")
+    pw = node(unreal.MaterialExpressionPower, 150, -100)
+    mel.connect_material_expressions(sat, "", pw, "Base")
+    mel.connect_material_expressions(const(50, 100, CAUSTIC_SHARPEN), "", pw, "Exp")
+    out = add(mul(pw, const(150, 100, CAUSTIC_GAIN), 300, -100), const(300, 100, CAUSTIC_LIFT), 450, -100)
+    mel.connect_material_property(out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
 m_caus = material("M_Caustics")
@@ -174,7 +240,9 @@ eal.save_loaded_asset(m_caus)
 
 # --- level -------------------------------------------------------------------
 # Reuse the existing map (keeps the asset path stable, no ReefM1_1 duplicates)
-# but clear every actor so stale ones never accumulate across runs.
+# but clear every actor so stale ones never accumulate across runs. Note this
+# only resets actors: WorldSettings, sublevels and other per-map state persist
+# from the previous run.
 if eal.does_asset_exist(MAP):
     assert les.load_level(MAP), "load_level failed"
     old = eas.get_all_level_actors()
@@ -194,22 +262,20 @@ def spawn(cls, loc, rot=(0.0, 0.0), label=None):
     return a
 
 
-# z=+1 keeps the editor grid (drawn at z=0) from z-fighting the sand in captures.
-floor = spawn(unreal.StaticMeshActor, (0, 0, 1), label="SandFloor")
+floor = spawn(unreal.StaticMeshActor, (0, 0, FLOOR_Z), label="SandFloor")
 smc = floor.static_mesh_component
 smc.set_mobility(unreal.ComponentMobility.STATIC)
-assert smc.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/Plane")), "floor mesh"
+assert smc.set_static_mesh(unreal.load_asset(ENGINE_PLANE)), "floor mesh missing: %s" % ENGINE_PLANE
 smc.set_material(0, m_sand)
-floor.set_actor_scale3d(unreal.Vector(40, 40, 1))
+floor.set_actor_scale3d(unreal.Vector(FLOOR_SCALE, FLOOR_SCALE, 1))
 
 sun = spawn(unreal.DirectionalLight, (0, 0, 1000), SUN_ROT, label="Sun")
 sc = sun.light_component
 sc.set_mobility(unreal.ComponentMobility.MOVABLE)   # light function + volumetric shafts
-sc.set_intensity(8.0)
-sc.set_light_color(unreal.LinearColor(0.55, 0.85, 1.0))
-sc.set_editor_property("volumetric_scattering_intensity", 8.0)
-sc.set_editor_property("light_function_material", m_caus)
-sc.set_editor_property("light_function_scale", unreal.Vector(400, 400, 400))
+sc.set_intensity(SUN_INTENSITY)
+sc.set_light_color(unreal.LinearColor(**SUN_COLOR))
+sc.set_editor_property("volumetric_scattering_intensity", SUN_VOLUMETRIC_SCATTERING)
+sc.set_editor_property("light_function_material", m_caus)   # graph reads WorldPosition; scale is irrelevant
 sc.set_editor_property("cast_volumetric_shadow", True)
 
 sky = spawn(unreal.SkyLight, (0, 0, 500), label="Sky")
@@ -218,45 +284,41 @@ kc.set_mobility(unreal.ComponentMobility.MOVABLE)
 # A specified cubemap gives stable blue ambient without any sky geometry to
 # capture (there is no atmosphere in this scene; the far background is fog).
 kc.set_editor_property("source_type", unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP)
-cube = unreal.load_asset("/Engine/MapTemplates/Sky/DaylightAmbientCubemap")
-assert isinstance(cube, unreal.TextureCube), "sky cubemap missing"
+cube = unreal.load_asset(ENGINE_SKY_CUBEMAP)
+assert isinstance(cube, unreal.TextureCube), "sky cubemap missing: %s" % ENGINE_SKY_CUBEMAP
 kc.set_editor_property("cubemap", cube)
-kc.set_intensity(0.8)
-kc.set_light_color(unreal.LinearColor(0.35, 0.65, 0.9))
-kc.set_editor_property("volumetric_scattering_intensity", 0.5)
+kc.set_intensity(SKY_INTENSITY)
+kc.set_light_color(unreal.LinearColor(**SKY_COLOR))
+kc.set_editor_property("volumetric_scattering_intensity", SKY_VOLUMETRIC_SCATTERING)
 kc.recapture_sky()
 
 fog = spawn(unreal.ExponentialHeightFog, (0, 0, 0), label="Water")
 fc = fog.component
-# Measured in-editor (auto exposure is off in this project): density 1.5 barely
-# tints the floor at 20 m; 5.0 gives ~40% haze on the fish at 3.3 m and a fully
-# fogged background by ~15 m. Falloff 0 = uniform density (we are inside water).
-fc.set_editor_property("fog_density", 5.0)
-fc.set_editor_property("fog_height_falloff", 0.0)
+fc.set_editor_property("fog_density", FOG_DENSITY)
+fc.set_editor_property("fog_height_falloff", FOG_HEIGHT_FALLOFF)
 fc.set_editor_property("fog_max_opacity", 1.0)
 fc.set_editor_property("start_distance", 0.0)
-fc.set_editor_property("fog_inscattering_luminance", unreal.LinearColor(0.02, 0.18, 0.30))
-fc.set_editor_property("directional_inscattering_luminance", unreal.LinearColor(0.10, 0.35, 0.45))
+fc.set_editor_property("fog_inscattering_luminance", unreal.LinearColor(**FOG_INSCATTER))
+fc.set_editor_property("directional_inscattering_luminance", unreal.LinearColor(**FOG_DIRECTIONAL_INSCATTER))
 fc.set_editor_property("enable_volumetric_fog", True)
-fc.set_editor_property("volumetric_fog_scattering_distribution", 0.6)
+fc.set_editor_property("volumetric_fog_scattering_distribution", FOG_SCATTERING_DISTRIBUTION)
 # NB: unreal.Color positional order is (b, g, r, a); use keywords.
-fc.set_editor_property("volumetric_fog_albedo", unreal.Color(r=30, g=140, b=200, a=255))
-fc.set_editor_property("volumetric_fog_extinction_scale", 1.0)
-fc.set_editor_property("volumetric_fog_distance", 6000.0)
+fc.set_editor_property("volumetric_fog_albedo", unreal.Color(**FOG_ALBEDO))
+fc.set_editor_property("volumetric_fog_extinction_scale", FOG_EXTINCTION_SCALE)
+fc.set_editor_property("volumetric_fog_distance", FOG_VOLUMETRIC_DISTANCE)
 
 cam = spawn(unreal.CameraActor, CAM_LOC, CAM_ROT, label="DiverCamera")
 cam.tags = [unreal.Name("DiverCamera")]
-cam.camera_component.set_field_of_view(75.0)
+cam.camera_component.set_field_of_view(CAM_FOV)
 
-fish_cls = unreal.load_class(None, "/Script/Aquarium.FishActor")
+fish_cls = unreal.load_class(None, FISH_CLASS)
 assert fish_cls is not None, "FishActor class not found (is the C++ module built?)"
-# Yaw 90 shows the fish side-on in editor stills; at runtime facing follows velocity.
-fish = spawn(fish_cls, FISH_ORIGIN, (0.0, 90.0), label="BlueTang")
+fish = spawn(fish_cls, FISH_ORIGIN, (0.0, FISH_EDITOR_YAW), label="BlueTang")
 sk = unreal.load_asset(FISH_MESH)
 assert isinstance(sk, unreal.SkeletalMesh), "fish mesh missing: %s" % FISH_MESH
 fish.set_editor_property("fish_mesh", sk)
 fish.set_editor_property("plane_origin", unreal.Vector(*FISH_ORIGIN))
-fish.set_editor_property("seed", 7)
+fish.set_editor_property("seed", FISH_SEED)
 fish.set_editor_property("plane_half_width", FISH_HALF_W)
 fish.set_editor_property("plane_half_height", FISH_HALF_H)
 # The actor applies FishMesh to its body only at BeginPlay; push it now so the
