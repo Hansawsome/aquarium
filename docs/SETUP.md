@@ -125,7 +125,7 @@ done
 # 4b. 한국어 폰트 (FontFace 에셋; 폰트 임포트는 commandlet에서 크래시하므로 ExecCmds 방식)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput -ExecCmds="py $PWD/unreal/Aquarium/Scripts/import_fonts.py, quit" 2>&1 | grep FONT_OK
 
-# 5. Unreal Automation 테스트 (36개)
+# 5. Unreal Automation 테스트 (37개)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -ExecCmds="Automation RunTests Aquarium; Quit" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep "Test Completed"
 
 # 6. 영상: M1 34초 유영(-dumpmovie, UI 없음) / M2 13.5초 입장→세션→나가기 흐름(UI 포함 프레임 캡처, 개발 전용 옵션)

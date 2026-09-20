@@ -35,6 +35,13 @@ public:
 	// Ends the active session (button or Esc) and returns to the entry screen; no-op when idle.
 	void RequestExit();
 
+	// Clears every held arrow-key flag. Both ShowEntry() and ShowSession() install a UI-capturing
+	// input mode (FInputModeUIOnly / FInputModeGameAndUI over a widget), which can swallow the
+	// IE_Released for a key a child is still holding when the mode switches (e.g. Esc or the HUD
+	// exit button while Right is held). Without this, a stale bRight=true survives into the next
+	// session and drives the new fish hard right from frame one with no key actually held.
+	void ResetArrowKeys();
+
 	// Maps a BeginSession verdict to the entry-screen error. Pure, so it is testable headless.
 	static EEntryError EntryErrorFor(EBeginSessionResult Result, const FString& Raw);
 	// Parses -AquariumAutoNickname=<name> [-AquariumAutoExitAfter=<sec>]; false when no nickname given.
@@ -58,6 +65,10 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	// Test-only access to ArrowKeys, so Aquarium.Controller.ClearsHeldKeysOnSessionChange can set a
+	// held key without a real input event and observe ShowEntry()/ShowSession() clear it.
+	friend class FControllerClearsHeldKeysOnSessionChange;
+
 	UPROPERTY() TObjectPtr<UEntryWidget> Entry = nullptr;
 	UPROPERTY() TObjectPtr<UHudWidget> Hud = nullptr;
 	FTimerHandle AutoSubmitTimer;

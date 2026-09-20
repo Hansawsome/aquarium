@@ -87,11 +87,16 @@ FVector2D ADiverPlayerController::DirectionFor(const FArrowKeys& Keys)
 	return FVector2D(V.x, V.y);
 }
 
+void ADiverPlayerController::ResetArrowKeys()
+{
+	ArrowKeys = FArrowKeys();
+}
+
 void ADiverPlayerController::HandleApplicationActivationChanged(bool bIsActive)
 {
 	// Releasing the keys first means a key held across the focus change cannot stay stuck down:
 	// the OS never delivers its IE_Released to us while the window is in the background.
-	ArrowKeys = FArrowKeys();
+	ResetArrowKeys();
 	AAquariumGameMode* GM = GameMode();
 	if (GM == nullptr)
 	{
@@ -183,6 +188,10 @@ void ADiverPlayerController::SetupInputComponent()
 
 void ADiverPlayerController::ShowEntry()
 {
+	// Clear any held arrow key before FInputModeUIOnly below takes over: that mode can swallow the
+	// IE_Released for a key a child is still holding (Esc/HUD exit while Right is held), which
+	// would otherwise leave ArrowKeys stuck and drive the next session's fish from frame one.
+	ResetArrowKeys();
 	if (!Entry || !Hud)
 	{
 		return;
@@ -199,6 +208,10 @@ void ADiverPlayerController::ShowEntry()
 
 void ADiverPlayerController::ShowSession()
 {
+	// Same reasoning as ShowEntry(): FInputModeGameAndUI below can swallow a key-up mid-switch, so
+	// start the new session with a clean slate rather than inheriting a stuck key from the moment
+	// the widgets were toggled.
+	ResetArrowKeys();
 	if (!Entry || !Hud)
 	{
 		return;
@@ -261,6 +274,13 @@ void ADiverPlayerController::RequestExit()
 	AAquariumGameMode* GM = GameMode();
 	if (GM && GM->HasActiveSession())
 	{
+		// Belt-and-braces: stop steering the outgoing fish before EndSession() destroys it, so
+		// nothing is left driven by a key this controller no longer owns. ShowEntry() (called
+		// below) is what actually protects the NEXT session by clearing ArrowKeys.
+		if (AFishActor* Fish = GM->PlayerFish())
+		{
+			Fish->SetInputDirection(FVector2D::ZeroVector);
+		}
 		GM->EndSession();
 		ShowEntry();
 	}

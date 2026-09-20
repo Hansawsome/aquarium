@@ -127,4 +127,33 @@ bool FControllerAutoInput::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FControllerClearsHeldKeysOnSessionChange, "Aquarium.Controller.ClearsHeldKeysOnSessionChange",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FControllerClearsHeldKeysOnSessionChange::RunTest(const FString&)
+{
+	// Regression for: a child holds Right and exits (Esc / HUD exit button) while ShowEntry()
+	// installs FInputModeUIOnly, which swallows the IE_Released -- ArrowKeys.bRight stays true and
+	// drives the NEXT session's fish from frame one with no key actually held.
+	// ShowEntry()/ShowSession() both bail out early when Entry/Hud are unset (as they are for a
+	// bare NewObject controller, headless), but ResetArrowKeys() now runs before that guard, so
+	// this exercises the real fix without needing a live widget tree.
+	ADiverPlayerController* Controller = NewObject<ADiverPlayerController>();
+	if (!TestNotNull(TEXT("controller"), Controller))
+	{
+		return false;
+	}
+
+	Controller->ArrowKeys.bRight = true;
+	Controller->ShowEntry();
+	TestFalse(TEXT("ShowEntry clears bRight"), Controller->ArrowKeys.bRight);
+
+	Controller->ArrowKeys.bUp = true;
+	Controller->ArrowKeys.bLeft = true;
+	Controller->ShowSession();
+	TestFalse(TEXT("ShowSession clears bUp"), Controller->ArrowKeys.bUp);
+	TestFalse(TEXT("ShowSession clears bLeft"), Controller->ArrowKeys.bLeft);
+	return true;
+}
+
 #endif

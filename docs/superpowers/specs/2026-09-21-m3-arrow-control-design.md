@@ -13,7 +13,7 @@
 | 입력 방식 | `InputComponent->BindKey(EKeys::Up/Down/Left/Right, IE_Pressed/IE_Released, ...)`로 눌림 플래그를 유지하고, 매 틱 `aquarium::KeyState`를 만들어 `SteeringVector`에 넘긴다 | 프로젝트는 Enhanced Input이 기본이라 레거시 ActionMapping이 무시된다(M2 Esc에서 확인). `BindKey`는 에셋 없이 동작하고 이미 검증됐다. Enhanced Input 에셋(IMC/IA)은 Python 생성 경로가 불확실해 재현 원칙과 충돌한다 |
 | 제어 주체 | `AFishActor`에 `bPlayerControlled`와 `SetInputDirection(Vec2)`를 두고, 참이면 Wander 대신 입력 방향을 쓴다 | 규칙 계층 흐름(Wander → Avoid → Motion)에서 첫 단계만 갈아끼우면 되고, 배경 물고기는 손대지 않는다 |
 | 포커스 상실 | `FSlateApplication::OnApplicationActivationStateChanged`에 붙어 비활성 시 키 플래그를 모두 지우고 `MotionState.paused = true`, 복귀 시 해제 | F-06의 "입력 해제 + 일시정지 + 복귀 시 순간이동 금지". dt 상한(`maxDeltaTime` 0.1초)은 이미 규칙 계층에 있다 |
-| 경계 처리 | `AvoidBoundary`(바깥 성분 제거)를 **벽을 따라 미끄러지는** `SteerAlongBoundary`로 대체한다. 규칙 계층에 새 순수 함수로 추가하고 기존 함수는 남긴다 | M1·M2b에서 기록한 후속 항목: 바깥 성분을 0으로 만들면 속도가 0을 지나 반전해 방향이 뒤집히고 수직 롤이 생긴다. 벽을 따라 조향하면 플레이어도 "벽에 붙어 미끄러지는" 자연스러운 조작감을 얻는다 |
+| 경계 처리 | **(2026-09-21 구현 중 변경)** 배경 물고기와 플레이어 물고기를 다르게 처리한다: 배경 물고기는 `AvoidBoundary`를 벽을 따라 미끄러지는 `SteerAlongBoundary`로 대체한다(아래 결정 그대로). 플레이어 물고기는 반대로 기존 `AvoidBoundary`(바깥 성분 제거)를 그대로 쓰되, 폭이 좁은 전용 경계 대역 `PlayerAvoidDistance = 10 cm`를 준다(배경은 `AvoidDistance = 50 cm`) | M1·M2b에서 기록한 후속 항목대로 배경 물고기는 바깥 성분을 0으로 만들면 속도가 0을 지나 반전해 방향이 뒤집히고 수직 롤이 생기므로 `SteerAlongBoundary`가 맞다. 하지만 플레이어 물고기에 그대로 적용해 M3 캡처로 검증하자 벽을 따라 미끄러지는 동작이 아이가 요청하지 않은 방향 성분을 더해, 왼쪽 벽에서 왼쪽 키만 누르고 있어도 세로로 드리프트했다. 아이 입장에서는 "미는 방향으로 안 가면 그냥 멈추는" 편이 예측 가능하므로 플레이어는 `AvoidBoundary`(밀면 멈춤, 불필요한 드리프트 없음)를 유지한다. 다만 배경용 50 cm 대역을 그대로 쓰면 반폭 ~130 cm 평면에서 벽에 도달하기 전 38%나 되는 지점에서부터 막혀 보이지 않는 벽처럼 느껴지므로, 플레이어 전용으로 10 cm의 좁은 대역을 둬 가장자리까지 자연스럽게 타도록 한다 |
 | 안전장치 | `ClampToArea`는 그대로 유지 | 최종 이탈 방지 |
 | 화면 비율 | 유영 평면은 월드 고정(4×2 m 상당)이라 화면 비율이 바뀌어도 물고기는 영역 안에 있다. 비율이 좁아지면 가장자리가 화면 밖으로 나갈 수 있으므로, 카메라 FOV 기준으로 평면 반폭을 런타임에 줄이는 보정을 게임 모드에 넣는다 | SRS F-07 "여러 화면 비율에서 이탈 없음" |
 | 조작 속도 | 플레이어 물고기는 배경보다 빠르게: `MaxSpeed` 90 cm/s, `Accel` 140, `Decel` 180 (배경은 25~55) | 아이가 "반응한다"고 느낄 최소치. 방향 전환은 기존 `MaxFacingTurnRate` 슬루가 부드럽게 만든다 |
@@ -33,11 +33,13 @@ Vec2 SteerAlongBoundary(Vec2 pos, Vec2 dir, Rect area, float avoidDistance);
 
 동작: 각 축에 대해 벽 접근 거리 안이면서 바깥으로 향하면 그 축 성분을 제거하고, 남은 성분을 **원래 크기로 재정규화**한다(둘 다 막히면 영역 중심 쪽을 향한다). `AvoidBoundary`는 기존 테스트와 함께 남겨 둔다.
 
+**(2026-09-21 구현 중 변경)** 위 `SteerAlongBoundary`는 배경 물고기에만 적용된다. 플레이어 물고기는 `AvoidBoundary`를 그대로 쓴다 — 이유는 위 결정 사항 표의 "경계 처리" 행 참고.
+
 ### `AFishActor`
 - `UPROPERTY(VisibleAnywhere) bool bPlayerControlled = false;`
 - `void SetInputDirection(const FVector2D& Dir)` — 화면 기준(x=오른쪽, y=위) 단위 벡터 이하.
 - `void SetPaused(bool bPaused)` — `Motion.paused`를 설정.
-- `StepSwim`: `bPlayerControlled`면 `Wander` 대신 입력 방향을 쓰고, `SteerAlongBoundary`를 거쳐 `StepMotion`으로 간다. 나머지(변환·본 파동·슬루)는 그대로.
+- `StepSwim`: `bPlayerControlled`면 `Wander` 대신 입력 방향을 쓴다. 경계 처리는 갈라진다 — 플레이어는 `AvoidBoundary(..., PlayerAvoidDistance)`(좁은 10 cm 대역, 밀면 멈춤), 배경은 `SteerAlongBoundary(..., AvoidDistance)`(50 cm 대역, 벽을 따라 미끄러짐) — 이후 `StepMotion`으로 간다. 나머지(변환·본 파동·슬루)는 그대로.
 
 ### `ADiverPlayerController`
 - `SetupInputComponent`: 네 방향키를 `IE_Pressed`/`IE_Released`에 묶어 `FKeyFlags{bUp,bDown,bLeft,bRight}`를 갱신.

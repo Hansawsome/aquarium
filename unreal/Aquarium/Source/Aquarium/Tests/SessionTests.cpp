@@ -228,12 +228,37 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionPlaneFitsAspect, "Aquarium.Session.Plan
 
 bool FSessionPlaneFitsAspect::RunTest(const FString&)
 {
-	const FVector2D Fitted = AAquariumGameMode::FitPlaneToView(220.f, 75.f, 4.f / 3.f, FVector2D(130.f, 65.f));
-	TestTrue(TEXT("half width fits"), Fitted.X <= 130.f);
-	TestTrue(TEXT("half height fits"), Fitted.Y <= 65.f);
+	// At 220 cm / 75 deg / 4:3 the visible extents (~155 x 67 cm) are LARGER than the requested
+	// 130 x 65, so the old params never made the fit bind: every assertion below passed even for a
+	// stub that returns the request unchanged. Distance=220 / Fov=40 / Aspect=1.2 instead yields
+	// visible half extents smaller than the request on both axes, so this now genuinely exercises
+	// the clamp. Expected values are computed here from the same formula FitPlaneToView documents
+	// (VisibleHalfWidth = Distance * tan(Fov/2) * 0.92, VisibleHalfHeight = VisibleHalfWidth /
+	// Aspect, floored at 40/20) rather than just asserting <=, so a stub cannot pass by accident.
+	constexpr float kInset = 0.92f;
+	constexpr float kTolerance = 0.05f;
+	const float Distance = 220.f;
+	const float Fov = 40.f;
+	const float Aspect = 1.2f;
+	const FVector2D Request(130.f, 65.f);
+	const float ExpectedVisibleHalfWidth = Distance * FMath::Tan(FMath::DegreesToRadians(Fov) * 0.5f) * kInset;
+	const float ExpectedVisibleHalfHeight = ExpectedVisibleHalfWidth / Aspect;
+	// Both axes are expected to bind (be smaller than the request) for this pick of parameters.
+	TestTrue(TEXT("width actually binds for this test"), ExpectedVisibleHalfWidth < Request.X);
+	TestTrue(TEXT("height actually binds for this test"), ExpectedVisibleHalfHeight < Request.Y);
+
+	const FVector2D Fitted = AAquariumGameMode::FitPlaneToView(Distance, Fov, Aspect, Request);
+	TestTrue(TEXT("half width matches the documented formula"),
+		FMath::IsNearlyEqual(static_cast<float>(Fitted.X), ExpectedVisibleHalfWidth, kTolerance));
+	TestTrue(TEXT("half height matches the documented formula"),
+		FMath::IsNearlyEqual(static_cast<float>(Fitted.Y), ExpectedVisibleHalfHeight, kTolerance));
 	TestTrue(TEXT("still usable"), Fitted.X > 40.f && Fitted.Y > 20.f);
-	const FVector2D Wide = AAquariumGameMode::FitPlaneToView(220.f, 75.f, 21.f / 9.f, FVector2D(130.f, 65.f));
-	TestTrue(TEXT("wide screen keeps the requested width"), FMath::IsNearlyEqual(static_cast<float>(Wide.X), 130.f, 0.01f));
+
+	// A wide viewport (Distance=220 / Fov=75 / 21:9) leaves the request untouched: its visible
+	// extents (~155 x 67 cm) are larger than the request on both axes.
+	const FVector2D Wide = AAquariumGameMode::FitPlaneToView(220.f, 75.f, 21.f / 9.f, Request);
+	TestTrue(TEXT("wide screen keeps the requested width"), FMath::IsNearlyEqual(static_cast<float>(Wide.X), Request.X, 0.01f));
+	TestTrue(TEXT("wide screen keeps the requested height"), FMath::IsNearlyEqual(static_cast<float>(Wide.Y), Request.Y, 0.01f));
 	return true;
 }
 
