@@ -23,7 +23,7 @@ Required call order (each step assumes the previous ones ran, object mode throug
 build_species(spec) runs exactly that order from a data-only species description; the
 make_<species>.py scripts are specs plus one build_species call.
 """
-import bpy, bmesh, math, os
+import bpy, bmesh, math, mathutils, os
 
 
 def reset_scene():
@@ -393,3 +393,107 @@ def build_body_profile(name, length, profile, belly, width, sections=28, ring_se
     body.select_set(True); bpy.context.view_layer.objects.active = body
     bpy.ops.object.shade_smooth()
     return body
+
+
+def add_eye(name, centre, radius, sink=0.0):
+    """Eyeball sphere at `centre` (cm, body space), pushed `sink` cm toward the body axis so it
+    sits in a socket. Joined into the body later and sharing the body's UV space, so the iris and
+    pupil come from the baked colour map. Returns the object."""
+    x, y, z = centre
+    if sink and (y or z):
+        # push along the -y/-z direction, i.e. toward the body's long axis at this x
+        n = math.hypot(y, z)
+        y -= sink * y / n
+        z -= sink * z / n
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=16, radius=radius,
+                                         location=(x, y, z))
+    eye = bpy.context.object
+    eye.name = name; eye.data.name = name
+    bpy.ops.object.shade_smooth()
+    return eye
+
+
+def add_membrane_fin(name, outline, thickness_root, thickness_edge, rays=0, ray_depth=0.0,
+                     steps=6):
+    """Fin membrane in the XZ plane (y = 0) whose thickness tapers from `thickness_root` at the
+    first outline vertex to `thickness_edge` at the outer rim, optionally ridged by `rays` fin rays
+    of `ray_depth` cm. Flat plates read as paper; the taper and the rays are what make a fin.
+    `outline` is a list of (x, z) in body space, first vertex = root. Returns the object."""
+    if len(outline) < 3:
+        raise ValueError("membrane fin outline needs at least 3 points")
+    root = mathutils.Vector(outline[0])
+    rim = [mathutils.Vector(p) for p in outline[1:]]
+    if not rim:
+        raise ValueError("membrane fin outline needs rim points after the root")
+    far = max((p - root).length for p in rim) or 1.0
+
+    # Fin rays run from the root out to every (len(rim)/rays)-th rim point.
+    ray_dirs = []
+    if rays > 0 and ray_depth > 0.0:
+        step = max(1, len(rim) / float(rays))
+        for i in range(rays):
+            d = rim[min(len(rim) - 1, int(round(i * step)))] - root
+            if d.length > 1e-6:
+                ray_dirs.append(d.normalized())
+
+    def half_thickness(p):
+        """Half thickness at p: root value at the root, edge value at the rim, plus any ray ridge."""
+        d = mathutils.Vector(p) - root
+        r = d.length
+        u = min(1.0, r / far)
+        t = 0.5 * (thickness_root + (thickness_edge - thickness_root) * u)
+        if ray_dirs and r > 1e-6:
+            # sharp falloff off-ray; ridges swell just outside the root and fade into the rim
+            lobe = max(0.0, max(d.normalized().dot(a) for a in ray_dirs)) ** 10
+            t += ray_depth * 0.5 * lobe * (1.0 - u) ** 0.6 * min(1.0, u * 5.0)
+        return t
+
+    # The membrane is tessellated root -> rim so the ridges have interior vertices to rise on,
+    # and both shells are built explicitly (not via Solidify) so thickness varies per vertex.
+    grid = [[root.lerp(p, s / float(steps)) for p in rim] for s in range(1, steps + 1)]
+    verts, faces = [], []
+    for sign in (1.0, -1.0):
+        base = len(verts)
+        verts.append((root.x, 0.0, root.y))            # shared apex per shell
+        for row in grid:
+            for p in row:
+                t = half_thickness(p)
+                verts.append((p.x, sign * t, p.y))
+        w = len(rim)
+        def idx(s, i):                                  # s in 0..steps-1 (grid row), i along rim
+            return base + 1 + s * w + i
+        for i in range(w - 1):                          # apex fan onto the first row
+            tri = (base, idx(0, i), idx(0, i + 1))
+            faces.append(tri if sign > 0 else tri[::-1])
+        for s in range(steps - 1):                      # quad rows outward
+            for i in range(w - 1):
+                q = (idx(s, i), idx(s, i + 1), idx(s + 1, i + 1), idx(s + 1, i))
+                faces.append(q if sign > 0 else q[::-1])
+
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces); mesh.update()
+    ob = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(ob)
+    bpy.ops.object.select_all(action='DESELECT')
+    ob.select_set(True); bpy.context.view_layer.objects.active = ob
+
+    # Weld the two shells along the rim and the two straight root-to-rim edges, so the fin is
+    # a single closed solid rather than two loose sheets.
+    w = len(rim)
+    shell = 1 + steps * w
+    bm = bmesh.new(); bm.from_mesh(mesh); bm.verts.ensure_lookup_table()
+    def top(s, i): return bm.verts[1 + s * w + i]
+    def bot(s, i): return bm.verts[shell + 1 + s * w + i]
+    for i in range(w - 1):                              # outer rim
+        bm.faces.new((top(steps - 1, i), bot(steps - 1, i),
+                      bot(steps - 1, i + 1), top(steps - 1, i + 1)))
+    for s in range(steps - 1):                          # the two side edges back to the root
+        for a, b in ((0, 0), (w - 1, w - 1)):
+            bm.faces.new((top(s, a), bot(s, b), bot(s + 1, b), top(s + 1, a)))
+    for i in (0, w - 1):                                # apex triangles closing the side edges
+        bm.faces.new((bm.verts[0], bm.verts[shell], bot(0, i), top(0, i)))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-5)
+    bm.to_mesh(mesh); bm.free(); mesh.update()
+    bpy.ops.object.shade_smooth()
+    return ob
