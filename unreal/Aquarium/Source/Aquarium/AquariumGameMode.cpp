@@ -3,6 +3,12 @@
 #include "DiverSpectatorPawn.h"
 #include "FishActor.h"
 #include "Engine/World.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Kismet/GameplayStatics.h"
+#include "UnrealClient.h"
 
 #include <string>
 
@@ -101,6 +107,7 @@ EBeginSessionResult AAquariumGameMode::BeginSession(const FString& RawNickname)
 	case aquarium::BeginResult::Ok:              break;
 	}
 
+	FitSwimPlaneToViewport();
 	PlayerFishActor = SpawnPlayerFish(LoadedMeshes[static_cast<int32>(Session.OwnedFishIndex())]);
 	if (PlayerFishActor == nullptr)
 	{
@@ -124,6 +131,11 @@ AFishActor* AAquariumGameMode::SpawnPlayerFish(USkeletalMesh* Mesh)
 		return nullptr;
 	}
 	Fish->bIsPlayerFish = true;
+	// F-07: the session fish is driven by the arrow keys, not by its wander behavior.
+	Fish->bPlayerControlled = true;
+	Fish->MaxSpeed = PlayerMaxSpeed;
+	Fish->Accel = PlayerAccel;
+	Fish->Decel = PlayerDecel;
 	Fish->Seed = static_cast<uint32>(Rng.RandRange(1, 1000000));
 	Fish->PlaneOrigin = PlaneOrigin;
 	Fish->PlaneHalfWidth = PlaneHalfWidth;
@@ -146,6 +158,62 @@ AFishActor* AAquariumGameMode::SpawnPlayerFish(USkeletalMesh* Mesh)
 			Mesh != nullptr ? *Mesh->GetPathName() : TEXT("<null>"));
 	}
 	return Fish;
+}
+
+FVector2D AAquariumGameMode::FitPlaneToView(float DistanceCm, float HorizontalFovDeg, float AspectRatio, FVector2D RequestedHalfExtents)
+{
+	// Keep the fish off the very edge of the frame; the name tag sits above the body and would
+	// otherwise be clipped at the top of a narrow viewport.
+	constexpr float kInset = 0.92f;
+	// Never smaller than this, so a strange viewport cannot collapse the plane to a point.
+	constexpr float kMinHalfWidth = 40.f;
+	constexpr float kMinHalfHeight = 20.f;
+
+	FVector2D Fitted = RequestedHalfExtents;
+	if (DistanceCm > KINDA_SMALL_NUMBER && HorizontalFovDeg > 1.f && HorizontalFovDeg < 179.f && AspectRatio > KINDA_SMALL_NUMBER)
+	{
+		const float VisibleHalfWidth = DistanceCm * FMath::Tan(FMath::DegreesToRadians(HorizontalFovDeg) * 0.5f) * kInset;
+		const float VisibleHalfHeight = VisibleHalfWidth / AspectRatio;
+		Fitted.X = FMath::Min(Fitted.X, VisibleHalfWidth);
+		Fitted.Y = FMath::Min(Fitted.Y, VisibleHalfHeight);
+	}
+	Fitted.X = FMath::Max(Fitted.X, kMinHalfWidth);
+	Fitted.Y = FMath::Max(Fitted.Y, kMinHalfHeight);
+	return Fitted;
+}
+
+void AAquariumGameMode::FitSwimPlaneToViewport()
+{
+	float Aspect = 16.f / 9.f;
+	if (GEngine != nullptr && GEngine->GameViewport != nullptr && GEngine->GameViewport->Viewport != nullptr)
+	{
+		const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
+		if (Size.X > 0 && Size.Y > 0)
+		{
+			Aspect = static_cast<float>(Size.X) / static_cast<float>(Size.Y);
+		}
+	}
+
+	float Fov = 75.f;
+	TArray<AActor*> Cameras;
+	UGameplayStatics::GetAllActorsOfClassWithTag(GetWorld(), ACameraActor::StaticClass(), FName(TEXT("DiverCamera")), Cameras);
+	if (Cameras.Num() > 0)
+	{
+		if (const ACameraActor* Camera = Cast<ACameraActor>(Cameras[0]))
+		{
+			if (const UCameraComponent* Component = Camera->GetCameraComponent())
+			{
+				Fov = Component->FieldOfView;
+			}
+		}
+	}
+
+	const FVector2D Fitted = FitPlaneToView(PlaneOrigin.X, Fov, Aspect, FVector2D(PlaneHalfWidth, PlaneHalfHeight));
+	PlaneHalfWidth = Fitted.X;
+	PlaneHalfHeight = Fitted.Y;
+	// Geometry only; the nickname is never logged.
+	UE_LOG(LogTemp, Log, TEXT("AquariumGameMode: swim plane fitted to aspect %.3f, fov %.1f -> half extents (%.1f, %.1f)"),
+		Aspect, Fov, PlaneHalfWidth, PlaneHalfHeight);
 }
 
 void AAquariumGameMode::EndSession()

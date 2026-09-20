@@ -38,6 +38,11 @@ public:
 	// at X=220 (background fish sit at X >= 330) this makes it the biggest fish on screen.
 	// Background fish keep their own 0.75-1.3 scatter scale from Scripts/build_reef_m1.py.
 	UPROPERTY(EditAnywhere, Category = "Session") float PlayerFishTargetLengthCm = 34.f;
+	// The player's fish swims faster and responds harder than a background fish (MaxSpeed 40) so
+	// arrow-key input feels immediate rather than like nudging a drifting object (F-07).
+	UPROPERTY(EditAnywhere, Category = "Session") float PlayerMaxSpeed = 90.f;   // cm/s
+	UPROPERTY(EditAnywhere, Category = "Session") float PlayerAccel = 140.f;
+	UPROPERTY(EditAnywhere, Category = "Session") float PlayerDecel = 180.f;
 
 	EBeginSessionResult BeginSession(const FString& RawNickname);
 	void EndSession();
@@ -56,6 +61,12 @@ public:
 	// is active or when Seed is 0.
 	bool SetAssignmentSeed(int32 Seed);
 
+	// Shrinks the requested swim-plane half extents so the whole plane stays inside the camera
+	// frustum at DistanceCm. Pure, so it is testable headless. The visible half width is
+	// DistanceCm * tan(Fov/2) with a small inset, the half height that divided by AspectRatio;
+	// the result is the component-wise minimum against the request, floored so it stays usable.
+	static FVector2D FitPlaneToView(float DistanceCm, float HorizontalFovDeg, float AspectRatio, FVector2D RequestedHalfExtents);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -70,5 +81,7 @@ private:
 	UPROPERTY() TArray<TObjectPtr<USkeletalMesh>> LoadedMeshes;
 
 	void RebuildLoadedCatalog();
+	// Narrows PlaneHalfWidth/PlaneHalfHeight to the live viewport aspect and camera FOV.
+	void FitSwimPlaneToViewport();
 	AFishActor* SpawnPlayerFish(USkeletalMesh* Mesh);
 };

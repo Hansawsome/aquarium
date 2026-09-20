@@ -208,4 +208,33 @@ bool FSessionPlayerFishIsNormalizedSize::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionPlayerFishIsControllable, "Aquarium.Session.PlayerFishIsControllable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSessionPlayerFishIsControllable::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AAquariumGameMode* GM = SpawnGameMode(World, 1, 2);
+	GM->BeginSession(TEXT("니모"));
+	AFishActor* Fish = GM->PlayerFish();
+	if (!TestNotNull(TEXT("player fish"), Fish)) return false;
+	TestTrue(TEXT("player controlled"), Fish->bPlayerControlled);
+	TestTrue(TEXT("faster than background"), Fish->MaxSpeed >= 80.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionPlaneFitsAspect, "Aquarium.Session.PlaneFitsNarrowAspect",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSessionPlaneFitsAspect::RunTest(const FString&)
+{
+	const FVector2D Fitted = AAquariumGameMode::FitPlaneToView(220.f, 75.f, 4.f / 3.f, FVector2D(130.f, 65.f));
+	TestTrue(TEXT("half width fits"), Fitted.X <= 130.f);
+	TestTrue(TEXT("half height fits"), Fitted.Y <= 65.f);
+	TestTrue(TEXT("still usable"), Fitted.X > 40.f && Fitted.Y > 20.f);
+	const FVector2D Wide = AAquariumGameMode::FitPlaneToView(220.f, 75.f, 21.f / 9.f, FVector2D(130.f, 65.f));
+	TestTrue(TEXT("wide screen keeps the requested width"), FMath::IsNearlyEqual(static_cast<float>(Wide.X), 130.f, 0.01f));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
