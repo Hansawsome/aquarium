@@ -71,7 +71,26 @@ UE 5.8.2를 Launcher로 설치했다. C++ 프로젝트 골격을 `unreal/Aquariu
 
 첫 시도는 `BuildSettingsVersion.V5`가 5.8 설치형 엔진의 공유 빌드 환경과 충돌해 실패했고 `Latest`로 바꿔 해결했다.
 
-**미해결:** UBT 내부에서만 앱 마무리가 실패한다. 샌드박스 비활성화, `Build/Mac/Resources` 디렉터리 생성, 존재하지 않는 `TMPDIR` 재현 시도로는 원인을 못 찾았다. Xcode 27 + UE 5.8.2 조합 이슈로 추정한다. 컴파일 검증 목적은 달성했으므로 이월하고, M5 패키징(`RunUAT BuildCookRun`) 단계에서 재확인한다. 에디터 GUI 실행은 아직 하지 않았다(헤드리스 commandlet만).
+**미해결(M0 기록).** UBT 내부에서만 앱 마무리가 실패한다. 샌드박스 비활성화, `Build/Mac/Resources` 디렉터리 생성, 존재하지 않는 `TMPDIR` 재현 시도로는 원인을 못 찾았다.
+
+**M6에서 재확인(2026-09-21) — 여전히 원인 미특정, 우회 적용.** `RunUAT BuildCookRun` 단계에서
+이 문제를 정면으로 다뤘고 진단 기록은 [`docs/reviews/2026-09-21-m6-ubt.md`](reviews/2026-09-21-m6-ubt.md)에 있다.
+**현재 환경에서 그대로 재현된다.** 명령·스킴·pre-action 스크립트 본문·환경 변수·cwd·stdin은 전부
+기각됐다 — 완전히 동일한 `xcodebuild … UE_XCODE_BUILD_MODE=PostBuildSync` 명령이 셸에서는
+`env -i`로 환경을 비워도 성공하고, **UBT 액션 실행기의 자식으로 돌 때만** 실패한다. Xcode가 남기는
+진단은 base64 워크스페이스 토큰 하나뿐이고 result bundle에는 오류도 경고도 없다.
+**가장 유력한 남은 설명은 Xcode 버전이다** — Epic은 UE 5.8에 Xcode 26.0 최소 / 26.1.1 권장을
+문서화하고 27.x는 언급하지 않는데 이 기계는 Xcode 27.0 (27A266a) + MacOSX27.0 SDK다. 즉
+**Xcode 26.1.1로 내리는 것은 우회가 아니라 정상화**일 가능성이 높다. **Xcode 설치는 사용자 결정이므로
+M6에서 실행하지 않았다. 이 항목은 "해결"이 아니라 알려진 이탈(known deviation)로 닫는다.**
+
+**패키징은 이 결함에 막히지 않는다.** `scripts/package_mac.sh`가 우회를 스크립트 안에 박아 둔다 —
+`UE_BUILD_FROM_XCODE=1`로 빌드해 receipt를 쓰게 한 뒤 PostBuildSync를 스크립트가 직접 실행하고,
+`-skipbuild`로 쿡·스테이징한다. 이 경로는 Development·Shipping 양쪽에서 동작하며, 실행할
+`xcodebuild` 명령은 기억이 아니라 `Build.sh`의 stdout(`params:` 줄)에서 grep으로 되찾는다.
+(계획서가 적은 `Engine/Programs/UnrealBuildTool/Log.txt`는 이 설치본에 존재하지 않는다.)
+
+에디터 GUI 실행은 M0 시점에는 하지 않았다(헤드리스 commandlet만). 이후 MCP 검증에서 GUI를 띄웠다.
 
 ### Unreal 공식 MCP — 연결 검증 완료 (2026-09-20)
 
@@ -94,11 +113,29 @@ UE 5.8.2를 Launcher로 설치했다. C++ 프로젝트 골격을 `unreal/Aquariu
 
 호출 규약: `call_tool` 인자는 `toolset_name`(툴셋 전체 이름) + `tool_name`(접두사 없는 이름) + `arguments`. 선택 인자도 스키마에 있으면 명시해야 한다(예: `CaptureViewport`의 `captureTransform`, `annotations`는 생략 시 "needs a default value" 오류). 에디터 호출은 순차 수행한다.
 
-Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`). 에디터가 꺼져 있으면 연결 실패가 정상이다. 배포 게임에는 이 플러그인의 서버가 포함되지 않도록 패키징 단계(M5)에서 확인한다.
+Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`). 에디터가 꺼져 있으면
+연결 실패가 정상이다. **배포 게임 포함 여부 — M6에서 확인하고 조치했다(2026-09-21).** 확인해 보니
+`ModelContextProtocol`의 모듈 두 개가 `Type: Runtime`이라 **아무 조치 없이 패키징하면 배포 게임에
+MCP 런타임이 들어간다.** `Aquarium.uproject`의 두 플러그인 항목에 `"TargetAllowList": ["Editor"]`를
+추가해 에디터 타깃에서만 켜지게 했다(플러그인을 끄지 않은 이유는 `CaptureViewport` 검증 채널을
+유지하기 위해서다). 배제는 주장이 아니라 단언으로 확인한다 — `scripts/verify_package.sh`가 패키지의
+**코드**(실행 파일·dylib·`.modules` 매니페스트·스테이징된 플러그인 디렉터리)와 **우리 `.ini`**에서
+`ModelContextProtocol` 0건을 확인하고, 같은 스캐너를 엔진의 MCP 플러그인 디렉터리에 겨눈 대조군이
+**빨간불(7개 파일 적중)**임을 같은 실행에서 함께 단언한다.
+
+**계획서의 원래 MCP 검사는 아무것도 검사하지 않았다** — "게임 빌드 로그에서 0건"은 대조군에서도
+0건이었다(UBT는 플러그인 이름을 stdout에 찍지 않는다). 실제로 무는 검사는 UBT 중간 산출물 쪽이다:
+게임 `Aquarium.rsp` 6건 → 0건, 에디터 메타데이터는 16건(플러그인 유지).
+
+**쿡된 데이터의 MCP 문자열은 모듈이 아니다.** `Aquarium-Mac.pak` 1건은 스테이징된 `.uproject`의
+`TargetAllowList` 항목, 곧 **배제 기록 그 자체**이고, `global.ucas` 47건은 엔진 전역 이름 표다.
+그래서 게이트는 "번들 어디에도 0바이트"가 아니라 코드와 우리 설정에 걸려 있고, 데이터 적중은
+`note`로 계속 보이게 둔다. 실행 중 `lsof -nP -iTCP:8000 -sTCP:LISTEN` 0행도 볼 수 있지만 그쪽은
+약한 검사이므로 보조다.
 
 참고: `DefaultEngine.ini`의 시작 맵 `/Engine/Maps/Templates/OpenWorld`는 에디터가 `Untitled_1`로 열었다. M1에서 프로젝트 자체 맵을 만들면 교체한다.
 
-## M1~M4c 재현 명령 (2026-09-21)
+## M1~M6 재현 명령 (2026-09-21)
 
 모든 에셋은 스크립트 산출물이다. 저장소 루트에서:
 
@@ -157,7 +194,37 @@ EXTRA_ARGS="-AquariumNoSchooling" scripts/measure_m2b_perf.sh
 EXTRA_ARGS="-AquariumNoPropAvoid" scripts/measure_m2b_perf.sh
 EXTRA_ARGS="-AquariumNoSchooling -AquariumNoPropAvoid" scripts/measure_m2b_perf.sh
 EXTRA_ARGS="-AquariumNoFlee" scripts/measure_m2b_perf.sh
+
+# 12. M6 패키징과 검증 (출력 디렉터리 B는 저장소 밖이다. 패키지는 커밋하지 않는다)
+CONFIG=Development ./scripts/package_mac.sh          # PACKAGE_OK config=Development
+CONFIG=Shipping    ./scripts/package_mac.sh          # PACKAGE_OK config=Shipping
+B=<패키지 출력 디렉터리>                               # package_mac.sh가 APP= 줄로 찍어 준다
+CONTROL=1 ./scripts/verify_package.sh "$B/Development/Mac/Aquarium.app"              Development
+CONTROL=1 ./scripts/verify_package.sh "$B/Shipping/Mac/Aquarium-Mac-Shipping.app"    Shipping
+./scripts/verify_privacy.sh auto "$B/Development/Mac/Aquarium.app"   # AUTO_TOTAL>0 이고 전부 명령줄 에코
+APP="$B/Development/Mac/Aquarium.app" ./scripts/measure_package_perf.sh  # SRS 공식 측정 210초
+APP="$B/Development/Mac/Aquarium.app" ./scripts/render_m6_package.sh    # VIDEO_OK/STILL_OK/COMPARE_OK
 ```
+
+**Shipping 번들 이름이 다르다.** Development는 `Aquarium.app`이지만 Shipping은
+`Aquarium-Mac-Shipping.app`이고 실행 파일도 `Contents/MacOS/Aquarium-Mac-Shipping`이다.
+`Aquarium.app`을 가정한 스크립트는 성공한 Shipping 패키지를 "없음"으로 보고하고 검증을 아예
+돌리지 못한다 — M6에서 실제로 그랬고, 두 스크립트 모두 이제 실행 파일을 `find`로 찾는다.
+
+**성능 측정 길이 주의.** `measure_m2b_perf.sh`의 기본값은 `RUN_SEC=95`이고, 예열 30초를 빼면
+실측 구간이 **65초**뿐이다. SRS 38행은 3분을 요구하므로 **공식 판정은 반드시
+`measure_package_perf.sh`(기본 `RUN_SEC=210`)로 한다.** 이 스크립트는 `RUN_SEC`이
+예열+180초 미만이면 그 자리에서 거부한다.
+
+**패키지는 샌드박스에서 돈다.** 로그는 `~/Library/Logs/Aquarium`이 아니라
+`~/Library/Containers/com.YourCompany.Aquarium/Data/Library/Logs/Aquarium/`에 쌓이고,
+`-AquariumFrameStats`·`-AquariumCaptureUI`가 컨테이너 밖 경로(저장소 포함)를 가리키면
+**오류 없이 조용히 아무것도 쓰지 않아 크래시처럼 보인다.** 컨테이너 로그 디렉터리를
+`rm -rf` 후 다시 만들지 말 것 — 소유권이 바뀌어 샌드박스가 모든 쓰기를 조용히 거부한다.
+
+**Shipping 빌드는 헤드리스로 검증할 수 없다.** `#if !UE_BUILD_SHIPPING` 안의 개발 플래그가
+없으므로 자동 입장도 자동 캡처도 불가능하다. 그것이 의도한 성질이며, Shipping 빌드의 게임 플레이는
+사람만 확인할 수 있다.
 
 **2단계 비고 (M4a 이후 물고기 임포트는 종당 세 장).** 물고기 스크립트는 종마다 2048² 세 장
 (`T_<종>_{BaseColor,Normal,Roughness}.png`)을 베이크하므로 한 종에 약 1분이 더 걸린다.
