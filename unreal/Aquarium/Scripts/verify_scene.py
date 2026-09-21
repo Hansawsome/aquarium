@@ -127,6 +127,22 @@ for prop in props:
 assert prop_mesh_names == PROP_MESH_NAMES, \
     "not every prop mesh is represented: %s" % sorted(PROP_MESH_NAMES - prop_mesh_names)
 
+# Post-process grade (M4b): unbound, and every field it sets must have its override_ flag on,
+# because a PostProcessSettings field with the flag left False is silently ignored.
+ppvs = by_class.get("PostProcessVolume", [])
+assert len(ppvs) == 1, "expected exactly one PostProcessVolume, got %d" % len(ppvs)
+ppv = ppvs[0]
+assert ppv.get_editor_property("unbound"), "the grade volume must be unbound"
+pps = ppv.get_editor_property("settings")
+for field in ("color_saturation", "color_contrast", "white_temp", "bloom_intensity",
+              "bloom_threshold", "ambient_occlusion_intensity", "ambient_occlusion_radius",
+              "depth_of_field_fstop", "depth_of_field_focal_distance"):
+    assert pps.get_editor_property("override_" + field), "grade: override_%s is off" % field
+# Depth of field stays off: the camera is fixed and the child's own fish is the nearest thing
+# on screen, so a blur would land on exactly the subject.
+assert pps.get_editor_property("depth_of_field_fstop") >= 32.0 - 1e-3, "depth of field is on"
+assert abs(pps.get_editor_property("depth_of_field_focal_distance")) < 1e-3, "depth of field is on"
+
 # World settings: no per-map game mode override (project default AAquariumGameMode applies)
 world = ues.get_editor_world()
 ws_list = unreal.GameplayStatics.get_all_actors_of_class(world, unreal.WorldSettings)

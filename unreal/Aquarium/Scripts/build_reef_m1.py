@@ -120,6 +120,23 @@ GOBO_Z = 1100.0
 GOBO_SCALE = 60.0                       # 100 cm plane -> 60 m, wider than the 40 m floor
 GOBO_THRESHOLD = 0.42                   # opacity-mask cutoff; higher = narrower, sharper shafts
 
+# Post-process. Auto exposure is already off project-wide (r.DefaultFeature.AutoExposure=False),
+# so these are absolute. Lowering the fog costs contrast; the grade puts it back.
+PP_SATURATION = 1.15
+PP_CONTRAST = 1.06
+PP_TEMPERATURE = 5200.0                 # slightly warm, to offset the all-over blue cast
+PP_BLOOM_INTENSITY = 0.5
+PP_BLOOM_THRESHOLD = 1.0
+PP_AO_INTENSITY = 0.5
+PP_AO_RADIUS = 80.0
+
+# Depth of field is OFF BY DEFAULT and explicitly overridden off, so a change to the project
+# renderer settings cannot quietly turn it on. The camera is fixed and the thing the child is
+# looking at -- their own fish -- sits close to the camera, so DoF risks blurring exactly the
+# subject, and it costs frame time. To try it, set DOF to e.g.
+# dict(fstop=2.8, focal_distance=220.0) and re-run this script; nothing else changes.
+DOF = None
+
 # Caustics: (period cm, direction deg, drift turns/s). Directions are chosen so
 # no pair is within 30 deg of parallel or anti-parallel; periods are
 # non-commensurate. Each wave's phase is warped by the previous wave's sine.
@@ -465,6 +482,37 @@ cam = spawn(unreal.CameraActor, CAM_LOC, CAM_ROT, label="DiverCamera")
 cam.tags = [unreal.Name("DiverCamera")]
 cam.camera_component.set_field_of_view(CAM_FOV)
 
+pp = spawn(unreal.PostProcessVolume, (0, 0, 200), label="Grade")
+pp.set_editor_property("unbound", True)
+pp.set_editor_property("priority", 1.0)
+pp.set_editor_property("blend_weight", 1.0)
+pp_settings = pp.get_editor_property("settings")
+
+
+def pp_set(name, value):
+    """Set one post-process property and its override_ flag. A PostProcessSettings field with
+    its override flag left False is simply ignored, which is the classic way a grade 'does
+    nothing' while looking correct in the details panel."""
+    pp_settings.set_editor_property("override_" + name, True)
+    pp_settings.set_editor_property(name, value)
+
+
+pp_set("color_saturation", unreal.Vector4(PP_SATURATION, PP_SATURATION, PP_SATURATION, 1.0))
+pp_set("color_contrast", unreal.Vector4(PP_CONTRAST, PP_CONTRAST, PP_CONTRAST, 1.0))
+pp_set("white_temp", PP_TEMPERATURE)
+pp_set("bloom_intensity", PP_BLOOM_INTENSITY)
+pp_set("bloom_threshold", PP_BLOOM_THRESHOLD)
+pp_set("ambient_occlusion_intensity", PP_AO_INTENSITY)
+pp_set("ambient_occlusion_radius", PP_AO_RADIUS)
+if DOF is None:
+    # fstop 32 + focal distance 0 = no circle of confusion anywhere in the frame
+    pp_set("depth_of_field_fstop", 32.0)
+    pp_set("depth_of_field_focal_distance", 0.0)
+else:
+    pp_set("depth_of_field_fstop", DOF["fstop"])
+    pp_set("depth_of_field_focal_distance", DOF["focal_distance"])
+pp.set_editor_property("settings", pp_settings)
+
 fish_cls = unreal.load_class(None, FISH_CLASS)
 assert fish_cls is not None, "FishActor class not found (is the C++ module built?)"
 rng = random.Random(SCHOOL_SEED)
@@ -557,5 +605,6 @@ for i, (mesh_path, scale_range) in enumerate(mesh_order):
     prop_count += 1
 
 assert les.save_current_level(), "save_current_level failed"
-print("REEF_OK actors=%d fish=%d props=%d map=%s"
-      % (len(eas.get_all_level_actors()), fish_count, prop_count, MAP))
+print("REEF_OK actors=%d fish=%d props=%d dof=%s map=%s"
+      % (len(eas.get_all_level_actors()), fish_count, prop_count,
+         "off" if DOF is None else "on", MAP))
