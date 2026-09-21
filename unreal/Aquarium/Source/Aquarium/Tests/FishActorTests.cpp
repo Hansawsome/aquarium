@@ -704,4 +704,25 @@ bool FFishActorSpeedSurvivesPropAvoidance::RunTest(const FString&)
 	return TestTrue(FString::Printf(TEXT("no facing snap (largest swing %.1f deg)"), MaxFacingStepDeg), MaxFacingStepDeg < 45.f);
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishSchoolDevTogglesParse, "Aquarium.Fish.DevTogglesParse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishSchoolDevTogglesParse::RunTest(const FString&)
+{
+	// Pure parser, so no world and no command line are needed. These two flags exist for the
+	// per-item performance attribution run: M4b showed that predicting which item is expensive
+	// does not work, and toggling one at a time does.
+	TestTrue(TEXT("recognises -AquariumNoSchooling"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoSchooling -other"), TEXT("AquariumNoSchooling")));
+	TestTrue(TEXT("recognises -AquariumNoPropAvoid"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoPropAvoid"), TEXT("AquariumNoPropAvoid")));
+	TestFalse(TEXT("absent flag is false"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumAutoInput=RRLL"), TEXT("AquariumNoSchooling")));
+	TestFalse(TEXT("the two flags are independent"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoSchooling"), TEXT("AquariumNoPropAvoid")));
+	TestFalse(TEXT("a null command line is false, not a crash"),
+		UFishSchoolSubsystem::ParseDisableFlag(nullptr, TEXT("AquariumNoSchooling")));
+	return TestFalse(TEXT("a null flag is false, not a crash"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoSchooling"), nullptr));
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
