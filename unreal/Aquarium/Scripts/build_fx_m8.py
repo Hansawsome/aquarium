@@ -1,6 +1,10 @@
-# M8이 런타임에 쓰는 머티리얼 두 개를 만든다. 레벨은 건드리지 않는다 --
-# 난류 자국은 서브시스템이 런타임에 스폰하는 인스턴스이고, 물 밀림은 카메라
-# 컴포넌트의 블렌더블이라 PostProcessVolume을 레벨에 넣지 않는다.
+# M8이 런타임에 쓰는 머티리얼을 만든다. 레벨은 건드리지 않는다 --
+# 물 밀림은 카메라 컴포넌트의 블렌더블이라 PostProcessVolume을 레벨에 넣지 않는다.
+#
+# M_Wake(난류 자국)는 **제거됐다.** 실제 화면에서 이동할 때 물고기에 회색 줄로
+# 보였고, 사용자가 제거를 요구했다(2026-09-22). 헤드리스로는 확인할 수 없었던
+# 바로 그 실패다 -- 계획 단계에서 "머티리얼이 기본 회색으로 대체될 수 있다"고
+# 적어 둔 위험이 현실이 됐다.
 # 따라서 ReefM1.umap은 M8에서도 한 바이트도 바뀌지 않는다(verify_scene.py 기대값 불변).
 #
 # Niagara는 쓰지 않는다(M4b에서 부딪힌 벽). 해석적 머티리얼만 쓴다.
@@ -31,28 +35,6 @@ def material(name):
 
 def expr(mat, cls, x, y):
     return mel.create_material_expression(mat, cls, x, y)
-
-
-def build_wake(mat):
-    """난류 자국. 하얗고 반투명한 언릿. **귀여운 기포가 아니라 지나간 자리의 줄**이라
-    가장자리 하이라이트(Fresnel)를 쓰지 않는다 -- 그것이 M_Bubble을 '방울'로
-    읽히게 만드는 바로 그 표현이다. 길게 늘어난 모양은 인스턴스 스케일이 만든다."""
-    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
-    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
-    mat.set_editor_property("two_sided", True)
-    col = expr(mat, unreal.MaterialExpressionConstant3Vector, -400, 0)
-    col.set_editor_property("constant", unreal.LinearColor(1.0, 1.0, 1.0, 1.0))
-    gain = expr(mat, unreal.MaterialExpressionMultiply, -200, 0)
-    gval = expr(mat, unreal.MaterialExpressionConstant, -400, 160)
-    gval.set_editor_property("r", 1.35)
-    mel.connect_material_expressions(col, "", gain, "A")
-    mel.connect_material_expressions(gval, "", gain, "B")
-    mel.connect_material_property(gain, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    # 옅다. 진하면 하얀 공이 날아다니는 것으로 보인다. 사라지는 일은 인스턴스
-    # 스케일이 줄어드는 것으로 처리하므로(BubbleSubsystem::TickWakes) 여기는 상수다.
-    opac = expr(mat, unreal.MaterialExpressionConstant, -200, 320)
-    opac.set_editor_property("r", 0.30)
-    mel.connect_material_property(opac, "", unreal.MaterialProperty.MP_OPACITY)
 
 
 def build_water_push(mat):
@@ -100,7 +82,7 @@ def build_water_push(mat):
 
 
 built = []
-for name, build in (("M_Wake", build_wake), ("M_WaterPush", build_water_push)):
+for name, build in (("M_WaterPush", build_water_push),):
     m = material(name)
     assert m is not None, "could not create %s" % name
     build(m)
