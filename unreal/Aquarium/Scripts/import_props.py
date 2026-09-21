@@ -33,9 +33,16 @@ mel = unreal.MaterialEditingLibrary
 # scale of 100 would make them 100x too large (verified against the imported
 # bounds: a uniform scale of 1.0 gives boulder_01 half-extents 63.6/91.5/50.2 cm
 # for a 1.3 x 1.8 x 1.0 m rock).
-CORALS = ["BranchCoral", "PlateCoral", "BrainCoral"]
+CORALS = ["BranchCoral", "PlateCoral", "BrainCoral", "FanCoral", "TubeCoral"]
 ROCKS = ["boulder_01", "rock_07", "rock_09"]
 ROCK_SCALE = 1.0
+
+# Per-instance colour variation: one MaterialInstanceConstant per tint, assigned
+# to individual prop actors by build_reef_m1.py. Three tints per coral (the reef
+# should not look stamped), two per rock (the rocks already vary by mesh and by
+# AO).
+CORAL_TINTS = [(1.00, 1.00, 1.00), (0.82, 0.90, 1.05), (1.10, 0.92, 0.86)]
+ROCK_TINTS = [(1.00, 1.00, 1.00), (0.90, 0.95, 1.06)]
 
 # Scratch folder the rock LOD meshes are imported into before they are folded
 # into a single static mesh; deleted at the end of each rock.
@@ -174,6 +181,45 @@ def assign_material(sm, mat):
     eal.save_loaded_asset(sm)
 
 
+def add_tint(mat, source, source_output="", x=-150, y=-100):
+    """Multiply `source`'s output by a 'Tint' vector parameter and return the multiply node, so
+    the caller can connect it to Base Color. `source_output` is the output name on `source`
+    ("RGB" for a TextureSample, "" for an arithmetic node) -- passed explicitly rather than
+    sniffed from the node class, because a wrong guess here connects nothing and the tint simply
+    never appears. The parameter is what the per-instance MaterialInstanceConstants below
+    override; without it every copy of a mesh is the same colour and 22 props read as stamped."""
+    tint = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, x, y + 200)
+    tint.set_editor_property("parameter_name", "Tint")
+    tint.set_editor_property("default_value", unreal.LinearColor(r=1.0, g=1.0, b=1.0, a=1.0))
+    mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, x + 150, y)
+    mel.connect_material_expressions(source, source_output, mul, "A")
+    mel.connect_material_expressions(tint, "RGB", mul, "B")
+    return mul
+
+
+def make_tint_instances(mat, name, tints):
+    """Create (or reuse) MI_<name>_v0..vN as MaterialInstanceConstants of `mat`, each with its
+    own Tint. Reused in place so re-running never leaves MI_*_1 duplicates behind. Returns the
+    list of instances."""
+    out = []
+    for i, (r, g, b) in enumerate(tints):
+        path = DEST + "/MI_%s_v%d" % (name, i)
+        if eal.does_asset_exist(path):
+            mi = unreal.load_asset(path)
+            assert isinstance(mi, unreal.MaterialInstanceConstant), "not a MIC: %s" % path
+        else:
+            mi = asset_tools.create_asset("MI_%s_v%d" % (name, i), DEST,
+                                          unreal.MaterialInstanceConstant,
+                                          unreal.MaterialInstanceConstantFactoryNew())
+        assert mi is not None, "material instance creation failed: %s" % path
+        mel.set_material_instance_parent(mi, mat)
+        mel.set_material_instance_vector_parameter_value(
+            mi, "Tint", unreal.LinearColor(r=r, g=g, b=b, a=1.0))
+        eal.save_loaded_asset(mi)
+        out.append(mi)
+    return out
+
+
 def tri_count(sm):
     # LOD 0 only; that is the count that matters for scattered props.
     return sm.get_num_triangles(0)
@@ -187,22 +233,41 @@ def diag(sm):
 
 def import_coral(name):
     src = os.path.join(ROOT, "assets", "blender", "export")
-    tex = import_texture(os.path.join(src, "T_%s_BaseColor.png" % name),
-                         "T_%s_BaseColor" % name, srgb=True)
+    base = import_texture(os.path.join(src, "T_%s_BaseColor.png" % name),
+                          "T_%s_BaseColor" % name, srgb=True)
+    nor = import_texture(os.path.join(src, "T_%s_Normal.png" % name),
+                         "T_%s_Normal" % name, srgb=False,
+                         compression=unreal.TextureCompressionSettings.TC_NORMALMAP)
+    # TC_MASKS, not just srgb=False -- see the note in import_rock(); a roughness
+    # map left on TC_Default fails the whole material compile and the coral
+    # silently turns grey.
+    rgh = import_texture(os.path.join(src, "T_%s_Roughness.png" % name),
+                         "T_%s_Roughness" % name, srgb=False,
+                         compression=unreal.TextureCompressionSettings.TC_MASKS)
     sm = import_static_mesh(os.path.join(src, "%s.fbx" % name), "SM_%s" % name, 1.0)
 
     mat = get_or_create_material("M_%s" % name)
-    base = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -400, 0)
-    base.set_editor_property("texture", tex)
-    mel.connect_material_property(base, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
-    rough = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -400, 300)
-    rough.set_editor_property("r", 0.6)
-    mel.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    n_base = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, -200)
+    n_base.set_editor_property("texture", base)
+    mel.connect_material_property(add_tint(mat, n_base, "RGB"), "",
+                                  unreal.MaterialProperty.MP_BASE_COLOR)
+
+    n_nor = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, 200)
+    n_nor.set_editor_property("texture", nor)
+    n_nor.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+    mel.connect_material_property(n_nor, "RGB", unreal.MaterialProperty.MP_NORMAL)
+
+    n_rgh = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, 500)
+    n_rgh.set_editor_property("texture", rgh)
+    n_rgh.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_MASKS)
+    mel.connect_material_property(n_rgh, "R", unreal.MaterialProperty.MP_ROUGHNESS)
+
     mel.recompile_material(mat)
     eal.save_loaded_asset(mat)
+    instances = make_tint_instances(mat, name, CORAL_TINTS)
 
-    assign_material(sm, mat)
-    return [sm], [mat], [tex]
+    assign_material(sm, instances[0])
+    return [sm], [mat], [base, nor, rgh], instances
 
 
 def import_rock(rid):
@@ -236,7 +301,7 @@ def import_rock(rid):
     mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -300, -100)
     mel.connect_material_expressions(n_diff, "RGB", mul, "A")
     mel.connect_material_expressions(n_ao, "RGB", mul, "B")
-    mel.connect_material_property(mul, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(add_tint(mat, mul, ""), "", unreal.MaterialProperty.MP_BASE_COLOR)
 
     n_nor = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, 400)
     n_nor.set_editor_property("texture", nor)
@@ -250,25 +315,30 @@ def import_rock(rid):
 
     mel.recompile_material(mat)
     eal.save_loaded_asset(mat)
+    instances = make_tint_instances(mat, rid, ROCK_TINTS)
 
-    assign_material(sm, mat)
-    return [sm], [mat], [diff, nor, rgh, ao]
+    assign_material(sm, instances[0])
+    return [sm], [mat], [diff, nor, rgh, ao], instances
 
 
-meshes, materials, textures = [], [], []
+meshes, materials, textures, instances = [], [], [], []
 for n in CORALS:
-    m, mt, tx = import_coral(n)
+    m, mt, tx, mi = import_coral(n)
     meshes += m
     materials += mt
     textures += tx
+    instances += mi
 for r in ROCKS:
-    m, mt, tx = import_rock(r)
+    m, mt, tx, mi = import_rock(r)
     meshes += m
     materials += mt
     textures += tx
+    instances += mi
 
-print("PROPS_OK count=%d meshes=%d materials=%d textures=%d assets=[%s]" % (
-    len(meshes) + len(materials) + len(textures), len(meshes), len(materials), len(textures),
+print("PROPS_OK count=%d meshes=%d materials=%d instances=%d textures=%d assets=[%s]" % (
+    len(meshes) + len(materials) + len(instances) + len(textures), len(meshes),
+    len(materials), len(instances), len(textures),
     ", ".join(str(diag(sm)) for sm in meshes)))
 print("PROPS_OK materials=[%s]" % ", ".join(m.get_path_name() for m in materials))
+print("PROPS_OK instances=[%s]" % ", ".join(m.get_path_name() for m in instances))
 print("PROPS_OK textures=[%s]" % ", ".join(t.get_path_name() for t in textures))

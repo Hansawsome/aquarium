@@ -1,6 +1,6 @@
 # macOS 개발 도구와 MCP 연결
 
-상태 기준: 2026-09-21. 규칙 계층·Unreal 프로젝트·M1/M2/M2b/M3/M4a 장면과 에셋은 이 문서 끝의 재현 명령으로 만든다.
+상태 기준: 2026-09-21. 규칙 계층·Unreal 프로젝트·M1/M2/M2b/M3/M4a/M4b 장면과 에셋은 이 문서 끝의 재현 명령으로 만든다.
 
 ## 완료
 
@@ -98,7 +98,7 @@ Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`).
 
 참고: `DefaultEngine.ini`의 시작 맵 `/Engine/Maps/Templates/OpenWorld`는 에디터가 `Untitled_1`로 열었다. M1에서 프로젝트 자체 맵을 만들면 교체한다.
 
-## M1~M4a 재현 명령 (2026-09-21)
+## M1~M4b 재현 명령 (2026-09-21)
 
 모든 에셋은 스크립트 산출물이다. 저장소 루트에서:
 
@@ -110,7 +110,7 @@ cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output
 for f in bluetang clownfish yellowtang butterflyfish damselfish; do
   /Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_$f.py
 done
-/Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_corals.py   # 산호 3종
+/Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/make_corals.py   # 산호 5종(M4b), 종당 1024² 3장 베이크
 
 # 3. Unreal 에디터 빌드 (이 머신은 UnrealEditor.modules 갱신이 한 번 늦어 두 번 실행)
 UE="/Users/Shared/Epic Games/UE_5.8"
@@ -125,7 +125,7 @@ done
 # 4b. 한국어 폰트 (FontFace 에셋; 폰트 임포트는 commandlet에서 크래시하므로 ExecCmds 방식)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput -ExecCmds="py $PWD/unreal/Aquarium/Scripts/import_fonts.py, quit" 2>&1 | grep FONT_OK
 
-# 5. Unreal Automation 테스트 (37개)
+# 5. Unreal Automation 테스트 (38개)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -ExecCmds="Automation RunTests Aquarium; Quit" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep "Test Completed"
 
 # 6. 영상: M1 34초 유영(-dumpmovie, UI 없음) / M2 13.5초 입장→세션→나가기 흐름(UI 포함 프레임 캡처, 개발 전용 옵션)
@@ -137,6 +137,9 @@ scripts/measure_m2b_perf.sh   # 프레임 시간 CSV → docs/reviews/<날짜>-m
 
 # 7. M4a 검토 산출물: 근접 스틸 + 산호초 영상 + 장면 스틸 + 개선 전/후 나란히 비교
 scripts/render_m4a_compare.sh   # CLOSEUP_OK / VIDEO_OK / SCENE_OK / COMPARE_OK 확인
+
+# 8. M4b 검토 산출물: 산호 5종 근접 스틸 + 산호초 영상 + 장면 스틸 + M4a 대비 나란히 비교
+scripts/render_m4b_compare.sh   # CLOSEUP_OK / VIDEO_OK / SCENE_OK / COMPARE_OK + MATERIAL_COMPILE_FAILURES=0 확인
 ```
 
 **2단계 비고 (M4a 이후 물고기 임포트는 종당 세 장).** 물고기 스크립트는 종마다 2048² 세 장
@@ -162,6 +165,60 @@ sRGB만 끄고 `TC_Default`로 두면 "Sampler type is Linear Grayscale, should 
 **성능 재측정 비고.** `measure_m2b_perf.sh`는 산출물 이름을 항상 `<날짜>-m2b-*`로 쓴다.
 M4a 재측정본은 실행 후 CSV를 `<날짜>-m4a-frametimes.csv`로 옮기고, 보고서는 M2b 기준선 비교를
 더해 `docs/reviews/<날짜>-m4a-perf.md`에 직접 작성했다.
+
+**에디터 Python 호출 형태 — 반드시 `-nullrhi -stdout -FullStdOutLogOutput`.** 위 4·4b·5단계의
+명령 형태는 선택이 아니다. `-FullStdOutLogOutput` 없이 `-run=pythonscript`를 돌리면 스크립트는
+**아무것도 출력하지 않는다** — `REEF_OK`도, 실패했을 때의 `AssertionError`조차도 보이지 않는다.
+그런데도 스크립트는 **실제로 실행되어 레벨을 덮어쓴다.** 게다가 **종료 코드는 항상 1**이다.
+무관한 `GameFeatures: Error: Asset manager settings do not include a rule for assets of type
+GameFeatureData` 때문이며 스크립트 성패와 관계가 없다. 즉 출력도 종료 코드도 믿을 수 없어,
+성공과 조용한 실패가 겉보기에 완전히 똑같아지는 함정이다. **판정은 반드시 `*_OK` 표지 문자열의
+grep으로 한다**(`IMPORT_OK` / `REEF_OK` / `SCENE_OK` / `FONT_OK`). 종료 코드는 보지 않는다.
+
+**산호 3장 베이크 비고(M4b).** `make_corals.py`는 이제 다섯 종(`BranchCoral`, `PlateCoral`,
+`BrainCoral`, `FanCoral`, `TubeCoral`) 각각에 대해 `T_<종>_{BaseColor,Normal,Roughness}.png`
+1024² 세 장을 `fishlib.bake_maps`로 굽는다(2단계, 약 5분). 물고기와 같은 규약으로
+러프니스는 `TC_MASKS` + `SAMPLERTYPE_MASKS`로 임포트한다. **Blender 5.2의 Bump 노드 `Distance`
+기본값은 1.0이 아니라 0.001**이라 명시하지 않으면 노멀 맵이 조용히 무효가 된다. `bake_maps`의
+`min_variance`를 산호에서는 1e-4로 올려 이 경우를 퇴화로 잡는다(기본 바닥값은 분산 2.37e-06짜리
+무효 맵도 통과시켰다).
+
+**항목별 성능 토글(M4b).** `build_reef_m1.py`는 M4b에서 추가한 항목을 **하나씩** 끄는 환경 변수를
+읽는다. 아무것도 설정하지 않은 상태가 출하 설정이며, 커밋된 레벨은 언제나 그 상태로만 빌드한다.
+
+```bash
+AQ_DROP_CURTAINS=near   # 근거리 부유 입자 커튼 1장만 제거
+AQ_DROP_CURTAINS=all    # 커튼 3장 전부 제거
+AQ_DROP_GOBO=coarse     # 거친층(빛줄기 대비용) 고보 평면 제거
+AQ_DROP_GOBO=fine       # 고운층(바닥 물결 무늬용) 고보 평면 제거
+AQ_NO_SSAO=1            # 후처리 AO 강도 0
+AQ_PROP_COUNT=14        # 프롭 22 → 14
+```
+
+볼류메트릭 안개 격자는 레벨이 아니라 `unreal/Aquarium/Config/DefaultEngine.ini`의
+`r.VolumetricFog.GridPixelSize=4` / `r.VolumetricFog.GridSizeZ=128` 두 줄이므로 이 줄을 직접
+엔진 기본값(8 / 64)으로 바꿔 측정했다. 측정 절차는 `scripts/measure_m2b_perf.sh` 하나로 통일하고
+(같은 실행 시간·같은 워밍업), 레벨을 다시 빌드한 뒤 측정한다. **실행 간 노이즈 바닥이 약 1.3 fps**이므로
+그보다 작은 차이는 항목의 비용으로 읽지 않는다. 결과는
+[`docs/reviews/2026-09-21-m4b-perf.md`](reviews/2026-09-21-m4b-perf.md).
+
+**머티리얼 컴파일 검사의 한계.** Automation 테스트 `Aquarium.Content.PropMaterialsCompile`은
+`-nullrhi`에 `FMaterialResource`가 없어 **셰이더 컴파일 오류를 검사하지 못한다**(로그에
+`checked 51 texture samplers and 0 of 13 material resources`로 그대로 드러난다). 이 테스트가 실제로
+막아 주는 것은 RHI와 무관한 **샘플러 타입·텍스처 압축 설정 불일치**(M4a에서 두 번 당한
+"Sampler type is Linear Grayscale" 사고)뿐이다. 셰이더 컴파일 실패의 1차 방어선은 여전히
+**실제 게임 실행 로그 grep**이며, `-nullrhi`가 아닌 실행이어야 한다.
+
+```bash
+"$UE/Engine/Binaries/Mac/UnrealEditor" "$PWD/unreal/Aquarium/Aquarium.uproject" ReefM1 \
+  -game -windowed -ResX=1280 -ResY=720 -ForceRes -benchmark -fps=30 -seconds=12 \
+  -notexturestreaming -unattended -nosplash -log -AquariumAssignmentSeed=1
+grep -inE "Failed to compile Material|Sampler type|Default Material|WorldGridMaterial" \
+  ~/Library/Logs/Aquarium/Aquarium.log    # 0건이어야 한다
+```
+
+게임 실행 로그는 `unreal/Aquarium/Saved/Logs`가 아니라 **`~/Library/Logs/Aquarium/Aquarium.log`**에
+쌓인다(`-log`를 줘도 터미널에는 런처 잡음만 나온다).
 
 주의: GUI 에디터를 강제 종료한 뒤 다음 실행이 "패키지 복구" 프롬프트에 걸리면 `unreal/Aquarium/Saved/Autosaves`를 지운다. MCP `CaptureViewport`로 뷰포트 이미지를 얻는 절차는 위 "Unreal 공식 MCP" 절 참고.
 
