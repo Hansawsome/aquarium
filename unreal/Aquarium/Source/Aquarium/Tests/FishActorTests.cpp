@@ -5,6 +5,9 @@
 #include "Tests/AutomationEditorCommon.h"
 #include "Engine/World.h"
 #include "FishActor.h"
+#include "FishSchoolSubsystem.h"
+#include "Engine/SkeletalMesh.h"
+#include "aquarium/Boids.h"
 #include "aquarium/Facing.h"
 
 namespace
@@ -406,6 +409,173 @@ bool FFishActorNoLongTwistAcrossVertical::RunTest(const FString&)
 		TotalTwistDeg, TwistingSteps, ElapsedSec, PeakTwistRate));
 	return TestTrue(FString::Printf(TEXT("twist across vertical took %.3f s (limit 0.12 s), total %.1f deg"), ElapsedSec, TotalTwistDeg),
 		ElapsedSec < 0.12f);
+}
+
+namespace
+{
+// Registers a fish with the world's school subsystem and parks it at a fixed plane position.
+AFishActor* SchoolFish(UWorld* World, uint32 Seed, const FVector& Origin, USkeletalMesh* Mesh)
+{
+	AFishActor* Fish = SpawnFish(World, Seed);
+	Fish->PlaneOrigin = Origin;
+	Fish->PlaneHalfWidth = 400.f;
+	Fish->PlaneHalfHeight = 400.f;
+	Fish->FishMesh = Mesh;
+	Fish->InitializeSwim();
+	World->GetSubsystem<UFishSchoolSubsystem>()->Register(Fish);
+	return Fish;
+}
+} // namespace
+
+namespace
+{
+// Runs three same-species fish, 120 cm apart, for 20 simulated seconds at the given school weight
+// and returns the MEAN spread of the outer pair over the second half.
+//
+// Mean, not final: one final sample lands wherever the wander cycle happens to be. Second half,
+// not the whole run: the group starts 240 cm apart by construction, and no steering can compress
+// that instantly, so including the settling phase buries the difference being measured (a peak
+// over the whole run reads 240 for both weights -- measured).
+float SteadyOuterSpread(UWorld* World, USkeletalMesh* Mesh, float Weight)
+{
+	AFishActor* A = SchoolFish(World, 3u, FVector(400.f, -120.f, 150.f), Mesh);
+	AFishActor* B = SchoolFish(World, 4u, FVector(400.f, 0.f, 150.f), Mesh);
+	AFishActor* C = SchoolFish(World, 5u, FVector(400.f, 120.f, 150.f), Mesh);
+	A->SchoolWeight = Weight;
+	B->SchoolWeight = Weight;
+	C->SchoolWeight = Weight;
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	double Sum = 0.0;
+	int Samples = 0;
+	for (int i = 0; i < 400; ++i)
+	{
+		School->InvalidateSnapshot();
+		A->StepSwim(0.05f);
+		B->StepSwim(0.05f);
+		C->StepSwim(0.05f);
+		if (i >= 200)
+		{
+			Sum += FMath::Abs(A->GetActorLocation().Y - C->GetActorLocation().Y);
+			++Samples;
+		}
+	}
+	return static_cast<float>(Sum / FMath::Max(Samples, 1));
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorSchoolMatesPullTogether, "Aquarium.Fish.SchoolMatesPullTogether",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorSchoolMatesPullTogether::RunTest(const FString&)
+{
+	USkeletalMesh* Tang = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Tang)) return false;
+
+	// The same three seeds are run twice, in two fresh worlds, differing ONLY in SchoolWeight.
+	//
+	// The plan's version of this test asserted a single absolute limit (spread < 400 cm) against
+	// the schooled run alone. That guard was vacuous: with SchoolWeight forced to 0 these seeds
+	// still came in at 129 cm, so the test passed with schooling switched off entirely and could
+	// never have caught a broken wiring. Comparing the two runs makes the assertion about
+	// schooling rather than about the seeds.
+	UWorld* Loose = FAutomationEditorCommonUtils::CreateNewMap();
+	const float Unschooled = SteadyOuterSpread(Loose, Tang, 0.f);
+	UWorld* Tight = FAutomationEditorCommonUtils::CreateNewMap();
+	const float Schooled = SteadyOuterSpread(Tight, Tang, 0.55f);
+	TestEqual(TEXT("three fish registered"), Tight->GetSubsystem<UFishSchoolSubsystem>()->RegisteredCount(), 3);
+
+	AddInfo(FString::Printf(TEXT("steady outer spread: unschooled %.1f cm, schooled %.1f cm (ratio %.2f)"),
+		Unschooled, Schooled, Schooled / FMath::Max(Unschooled, 1.f)));
+	// Cohesion must visibly tighten the group, and must also hold it inside roughly one neighbour
+	// radius plus the separation the school keeps between its members.
+	TestTrue(FString::Printf(TEXT("schooling tightened the group (%.1f vs %.1f cm)"), Schooled, Unschooled),
+		Schooled < Unschooled * 0.75f);
+	return TestTrue(FString::Printf(TEXT("school stayed together (mean %.1f cm, limit 250)"), Schooled),
+		Schooled < 250.f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorOtherSpeciesDoNotPull, "Aquarium.Fish.OtherSpeciesDoNotPull",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorOtherSpeciesDoNotPull::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	USkeletalMesh* Tang = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	USkeletalMesh* Clown = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/Clownfish/SK_Clownfish.SK_Clownfish"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Tang)) return false;
+	if (!TestNotNull(TEXT("SK_Clownfish loads"), Clown)) return false;
+
+	AFishActor* A = SchoolFish(World, 3u, FVector(400.f, 0.f, 150.f), Tang);
+	AFishActor* B = SchoolFish(World, 4u, FVector(400.f, 100.f, 150.f), Clown);
+	TestNotEqual(TEXT("species keys differ"), A->SpeciesKey(), B->SpeciesKey());
+
+	// A blue tang 100 cm from a clownfish is inside neighborRadius but outside separationRadius,
+	// so the clownfish must contribute exactly nothing to the tang's steer.
+	const aquarium::BoidNeighbor N = B->AsNeighbor();
+	aquarium::BoidsParams P;
+	const aquarium::BoidsResult R = aquarium::SchoolingSteer(A->AsNeighbor().position, A->AsNeighbor().depth,
+		A->SpeciesKey(), &N, 1, P);
+	TestEqual(TEXT("no alignment/cohesion from another species"), R.consideredCount, 0);
+	TestEqual(TEXT("no separation at 100 cm from another species"), R.avoidCount, 0);
+	// But at 20 cm it IS separated from: a clownfish must not swim through a blue tang.
+	B->PlaneOrigin = FVector(400.f, 20.f, 150.f);
+	B->InitializeSwim();
+	const aquarium::BoidNeighbor Close = B->AsNeighbor();
+	const aquarium::BoidsResult R2 = aquarium::SchoolingSteer(A->AsNeighbor().position, A->AsNeighbor().depth,
+		A->SpeciesKey(), &Close, 1, P);
+	TestEqual(TEXT("separation from another species at 20 cm"), R2.avoidCount, 1);
+	return TestTrue(TEXT("pushed away from the other species"), R2.steer.x < -0.9f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorPlayerFishIsAvoidedNotFollowed, "Aquarium.Fish.PlayerFishIsAvoidedNotFollowed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorPlayerFishIsAvoidedNotFollowed::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	USkeletalMesh* Tang = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Tang)) return false;
+
+	AFishActor* Background = SchoolFish(World, 3u, FVector(400.f, 0.f, 150.f), Tang);
+	AFishActor* Player = SchoolFish(World, 4u, FVector(400.f, 90.f, 150.f), Tang);  // SAME species
+	Player->bIsPlayerFish = true;
+
+	const aquarium::BoidNeighbor N = Player->AsNeighbor();
+	TestTrue(TEXT("the player fish is marked avoidOnly"), N.avoidOnly);
+	aquarium::BoidsParams P;
+	const aquarium::BoidsResult R = aquarium::SchoolingSteer(Background->AsNeighbor().position,
+		Background->AsNeighbor().depth, Background->SpeciesKey(), &N, 1, P);
+	TestEqual(TEXT("never a cohesion/alignment target, even same species"), R.consideredCount, 0);
+	TestEqual(TEXT("avoided at 90 cm (avoidOnlyRadius 110)"), R.avoidCount, 1);
+	return TestTrue(TEXT("the school opens away from the player fish"), R.steer.x < -0.9f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorPlayerFishIgnoresSchooling, "Aquarium.Fish.PlayerFishIgnoresSchooling",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorPlayerFishIgnoresSchooling::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	USkeletalMesh* Tang = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Tang)) return false;
+
+	// A crowd of same-species fish sits hard to the LEFT of the player fish. If the player fish
+	// were a boid at all, cohesion would bend it left. It must go exactly where the key says.
+	AFishActor* Player = SchoolFish(World, 9u, FVector(400.f, 0.f, 150.f), Tang);
+	Player->bIsPlayerFish = true;
+	Player->bPlayerControlled = true;
+	Player->SetInputDirection(FVector2D(1.f, 0.f));   // screen right
+	for (int i = 0; i < 6; ++i)
+	{
+		SchoolFish(World, 20u + static_cast<uint32>(i), FVector(400.f, -100.f - 15.f * i, 150.f), Tang);
+	}
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	const FVector Before = Player->GetActorLocation();
+	for (int i = 0; i < 40; ++i)
+	{
+		School->InvalidateSnapshot();
+		Player->StepSwim(0.05f);
+	}
+	const FVector After = Player->GetActorLocation();
+	TestTrue(TEXT("moved right as instructed"), After.Y - Before.Y > 5.f);
+	return TestTrue(FString::Printf(TEXT("did not drift vertically (dz = %.3f)"), After.Z - Before.Z),
+		FMath::Abs(After.Z - Before.Z) < 2.f);
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

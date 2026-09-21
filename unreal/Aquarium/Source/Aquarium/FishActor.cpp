@@ -1,6 +1,11 @@
 #include "FishActor.h"
 
+#include "FishSchoolSubsystem.h"
 #include "NameTagComponent.h"
+
+#include "Engine/World.h"
+
+#include <algorithm>
 
 #include "Engine/SkeletalMesh.h"
 #include "ReferenceSkeleton.h"
@@ -66,6 +71,7 @@ void AFishActor::InitializeSwim()
 	FacingParamsValue.uprightRollRateDegPerSec = MaxFacingTurnRate;
 	FacingParamsValue.steepRollRateDegPerSec = SteepRollRate;
 	FacingParamsValue.steepBeginSin = SteepBeginSin;
+	SpeciesKeyValue = ComputeSpeciesKey();
 	Wander.Emplace(Seed, Area, /*arriveRadius*/ 15.f, /*targetLifetime*/ 8.f);
 	SwimPhase = 0.f;
 	InputDirection = {0.f, 0.f};
@@ -97,7 +103,28 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	// from a current target rather than a stale one.
 	Wander->Update(Motion.position, DeltaSeconds);
 	// Player input replaces the wander target entirely; a zero input coasts the fish to a stop.
-	const aquarium::Vec2 Desired = bPlayerControlled ? InputDirection : Wander->DesiredDirection(Motion.position);
+	aquarium::Vec2 Desired = bPlayerControlled ? InputDirection : Wander->DesiredDirection(Motion.position);
+	// Schooling applies to background fish only. The player's fish is never a boid: arrow keys
+	// must map to motion with nothing mixed in, or the child gets "I pressed left and it went
+	// somewhere else" (F-05/F-07). The other direction -- background fish reacting to the player
+	// -- is handled inside AsNeighbor(), which marks the player fish avoidOnly.
+	if (!bPlayerControlled && !bIsPlayerFish)
+	{
+		UWorld* W = GetWorld();
+		UFishSchoolSubsystem* School = W ? W->GetSubsystem<UFishSchoolSubsystem>() : nullptr;
+		if (School && School->bSchoolingEnabled && School->RegisteredCount() > 1)
+		{
+			const aquarium::Vec2 Shared{Plane.origin.y + Motion.position.x, Plane.origin.z + Motion.position.y};
+			BuildSortedNeighbors(School->Neighbors(), Shared);
+			if (!NeighborScratch.empty())
+			{
+				const aquarium::BoidsResult R = aquarium::SchoolingSteer(
+					Shared, Plane.origin.x, SpeciesKeyValue, NeighborScratch.data(), NeighborScratch.size(),
+					BoidsParamsValue);
+				Desired = aquarium::BlendSteering(Desired, R.steer, SchoolWeight);
+			}
+		}
+	}
 	// The two boundary rules are deliberately different for the player and for background fish.
 	// Player: AvoidBoundary only cancels the outward component, so pushing into a wall simply stops
 	// the fish. Sliding would add motion along the wall that the child never asked for (holding Left
@@ -316,10 +343,95 @@ void AFishActor::UpdateNameTagLocation()
 	}
 }
 
+int32 AFishActor::ComputeSpeciesKey() const
+{
+	// Derived from the mesh asset rather than authored as its own property. A species id that the
+	// level script would also have to write is the same duplicated-rule trap that let a prop
+	// radius bug live in BOTH build_reef_m1.py and verify_scene.py until M4b, where the verifier
+	// could never catch it. A fish with no mesh (test spawns) gets 0 and schools with other
+	// mesh-less fish; the tests pin that explicitly rather than leaving it to chance.
+	return FishMesh ? static_cast<int32>(GetTypeHash(FishMesh->GetFName())) : 0;
+}
+
+aquarium::BoidNeighbor AFishActor::AsNeighbor() const
+{
+	aquarium::BoidNeighbor N;
+	// Shared frame: every swim plane uses right = +Y and up = +Z, so adding the plane origin back
+	// gives one common 2D frame that any fish can use a direction from without conversion.
+	N.position = {Plane.origin.y + Motion.position.x, Plane.origin.z + Motion.position.y};
+	N.velocity = Motion.velocity;
+	N.depth = Plane.origin.x;
+	N.species = SpeciesKeyValue;
+	// The player's fish is a neighbour to be avoided, never one to be followed. Attracting the
+	// school to it would crowd exactly the fish the child is watching; ignoring it entirely would
+	// let other species swim through its body.
+	N.avoidOnly = bIsPlayerFish;
+	return N;
+}
+
+// Copies the neighbours that can possibly matter into NeighborScratch, NEAREST FIRST.
+//
+// aquarium::SchoolingSteer stops accumulating alignment/cohesion once maxNeighbors mates have
+// contributed, and it walks the array in order. On a registration-ordered snapshot that cap picks
+// an arbitrary six fish rather than the six nearest ones, so a fish would align with school mates
+// it cannot even see while ignoring the one beside it. Sorting here is the engine side's job: the
+// rules layer stays a pure function of whatever list it is handed.
+void AFishActor::BuildSortedNeighbors(const std::vector<aquarium::BoidNeighbor>& Snapshot,
+                                      const aquarium::Vec2& Shared)
+{
+	NeighborScratch.clear();
+	// Widest radius any neighbour could act through, so the gate never drops one that would have
+	// contributed separation.
+	const float MaxRadius = FMath::Max3(BoidsParamsValue.neighborRadius, BoidsParamsValue.separationRadius,
+	                                    BoidsParamsValue.avoidOnlyRadius);
+	const float MaxRadiusSq = MaxRadius * MaxRadius;
+	for (const aquarium::BoidNeighbor& N : Snapshot)
+	{
+		if (FMath::Abs(N.depth - Plane.origin.x) > BoidsParamsValue.depthRadius)
+		{
+			continue;
+		}
+		const float Dx = N.position.x - Shared.x;
+		const float Dy = N.position.y - Shared.y;
+		const float DistSq = Dx * Dx + Dy * Dy;
+		if (DistSq <= 1e-8f || DistSq > MaxRadiusSq)
+		{
+			continue;   // self, or too far for any rule to reach
+		}
+		NeighborScratch.push_back(N);
+	}
+	std::sort(NeighborScratch.begin(), NeighborScratch.end(),
+		[&Shared](const aquarium::BoidNeighbor& A, const aquarium::BoidNeighbor& B)
+		{
+			const float Ax = A.position.x - Shared.x, Ay = A.position.y - Shared.y;
+			const float Bx = B.position.x - Shared.x, By = B.position.y - Shared.y;
+			return (Ax * Ax + Ay * Ay) < (Bx * Bx + By * By);
+		});
+}
+
+void AFishActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* W = GetWorld())
+	{
+		if (UFishSchoolSubsystem* School = W->GetSubsystem<UFishSchoolSubsystem>())
+		{
+			School->Unregister(this);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
 void AFishActor::BeginPlay()
 {
 	Super::BeginPlay();
 	InitializeSwim();
+	if (UWorld* W = GetWorld())
+	{
+		if (UFishSchoolSubsystem* School = W->GetSubsystem<UFishSchoolSubsystem>())
+		{
+			School->Register(this);
+		}
+	}
 }
 
 void AFishActor::Tick(float DeltaSeconds)
