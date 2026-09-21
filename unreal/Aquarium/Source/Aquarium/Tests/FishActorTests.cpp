@@ -6,6 +6,8 @@
 #include "Engine/World.h"
 #include "FishActor.h"
 #include "FishSchoolSubsystem.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
 #include "aquarium/Boids.h"
 #include "aquarium/Facing.h"
@@ -576,6 +578,130 @@ bool FFishActorPlayerFishIgnoresSchooling::RunTest(const FString&)
 	TestTrue(TEXT("moved right as instructed"), After.Y - Before.Y > 5.f);
 	return TestTrue(FString::Printf(TEXT("did not drift vertically (dz = %.3f)"), After.Z - Before.Z),
 		FMath::Abs(After.Z - Before.Z) < 2.f);
+}
+
+namespace
+{
+// Spawns a tagged box prop at a world location, sized like a coral.
+AStaticMeshActor* SpawnProp(UWorld* World, const FVector& Location, const FVector& Scale)
+{
+	AStaticMeshActor* Prop = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Location, FRotator::ZeroRotator);
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	Prop->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+	Prop->GetStaticMeshComponent()->SetStaticMesh(Cube);
+	Prop->SetActorScale3D(Scale);
+	Prop->Tags.Add(UFishSchoolSubsystem::PropTag);
+	return Prop;
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorObstaclesDerivedFromPropBounds, "Aquarium.Fish.ObstaclesDerivedFromPropBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorObstaclesDerivedFromPropBounds::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	// /Engine/BasicShapes/Cube is 100 cm, so scale 1 gives half extents of 50 cm.
+	SpawnProp(World, FVector(400.f, 100.f, 60.f), FVector(1.f, 1.f, 3.f));   // reaches the plane
+	SpawnProp(World, FVector(900.f, 100.f, 60.f), FVector(1.f, 1.f, 1.f));   // 5 m away in depth
+	// A collapsed bound is not a small obstacle: with the rule's 20 cm margin it would become an
+	// invisible wall. It must produce no discs at all.
+	SpawnProp(World, FVector(400.f, -150.f, 150.f), FVector(1.f, 0.f, 0.f));
+
+	std::vector<aquarium::Obstacle> Obs;
+	School->BuildObstaclesForPlane(FVector(400.f, 0.f, 150.f), 40.f, Obs);
+	TestTrue(TEXT("the distant prop and the degenerate prop are filtered out"),
+		Obs.size() <= static_cast<size_t>(UFishSchoolSubsystem::MaxDiscsPerProp));
+	if (!TestTrue(TEXT("the near prop produced discs"), !Obs.empty())) return false;
+	for (const aquarium::Obstacle& O : Obs)
+	{
+		TestTrue(TEXT("no ghost disc from a degenerate bound"), O.center.x > 0.f);
+	}
+	// Radius is the HALF WIDTH of the actual bounds (50 cm), derived, not a copied table value.
+	TestTrue(FString::Printf(TEXT("radius %.1f is the actor's half width"), Obs[0].radius), FMath::IsNearlyEqual(Obs[0].radius, 50.f, 1.f));
+	// A 150 cm half-height prop against a 50 cm radius asks for 3 discs.
+	TestEqual(TEXT("a tall prop is a stack, not one fat disc"), static_cast<int32>(Obs.size()), 3);
+	// Plane-local: the prop is at world Y = 100 and the plane origin at Y = 0.
+	return TestTrue(FString::Printf(TEXT("disc centre x %.1f is plane-local"), Obs[0].center.x), FMath::IsNearlyEqual(Obs[0].center.x, 100.f, 1.f));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorSwimsAroundProp, "Aquarium.Fish.SwimsAroundPropInsteadOfThrough",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorSwimsAroundProp::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	SpawnProp(World, FVector(400.f, 0.f, 150.f), FVector(1.f, 1.f, 1.f));   // dead ahead, r = 50
+
+	AFishActor* Fish = SpawnFish(World, 5u);
+	Fish->bPlayerControlled = true;
+	Fish->PlaneOrigin = FVector(400.f, -250.f, 150.f);
+	Fish->PlaneHalfWidth = 400.f;
+	Fish->PlaneHalfHeight = 200.f;
+	Fish->InitializeSwim();
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));   // straight at the prop
+
+	float MinDist = 1e9f;
+	for (int i = 0; i < 400; ++i)
+	{
+		Fish->StepSwim(0.05f);
+		const FVector L = Fish->GetActorLocation();
+		MinDist = FMath::Min(MinDist, static_cast<float>(FVector2D(L.Y - 0.f, L.Z - 150.f).Size()));
+	}
+	AddInfo(FString::Printf(TEXT("closest approach %.1f cm to a 50 cm prop"), MinDist));
+	// Clearance, not contact: the fish must turn BEFORE it arrives. 50 cm radius, and the rule
+	// adds a 20 cm margin, so anything under 50 means it went through the solid part.
+	return TestTrue(FString::Printf(TEXT("kept clear of the prop (closest %.1f cm, limit 50)"), MinDist), MinDist > 50.f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorSpeedSurvivesPropAvoidance, "Aquarium.Fish.SpeedSurvivesPropAvoidance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorSpeedSurvivesPropAvoidance::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	SpawnProp(World, FVector(400.f, 0.f, 150.f), FVector(1.f, 1.f, 1.f));
+
+	AFishActor* Fish = SpawnFish(World, 5u);
+	Fish->bPlayerControlled = true;
+	Fish->PlaneOrigin = FVector(400.f, -250.f, 150.f);
+	Fish->PlaneHalfWidth = 400.f;
+	Fish->PlaneHalfHeight = 200.f;
+	Fish->InitializeSwim();
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));
+	for (int i = 0; i < 60; ++i) Fish->StepSwim(0.05f);   // reach cruising speed
+
+	// This is the M3 regression guard: an avoidance rule that zeroes the blocked component makes
+	// the speed dip toward zero, and a velocity through zero has no stable heading, which flipped
+	// the facing 180 degrees. The speed must stay up the whole way past the prop.
+	float MinSpeed = 1e9f;
+	float MaxFacingStepDeg = 0.f;
+	bool bPassedProp = false;
+	FQuat Prev = Fish->GetActorQuat();
+	for (int i = 0; i < 340; ++i)
+	{
+		// Stop before the far wall. The plan's version simply ran 340 more steps, which is 17 s
+		// of travel across a 400 cm half-width plane: the fish parks against the boundary and
+		// AvoidBoundary brings it to a standstill BY DESIGN (that is the M3 player rule -- push
+		// into a wall and you stop). Measured min speed was 0.0 cm/s, a failure that said nothing
+		// about prop avoidance. The window ends where the boundary band begins.
+		if (Fish->GetActorLocation().Y - Fish->PlaneOrigin.Y > Fish->PlaneHalfWidth - 60.f)
+		{
+			break;
+		}
+		Fish->StepSwim(0.05f);
+		if (Fish->GetActorLocation().Y > 30.f)
+		{
+			bPassedProp = true;   // the prop sits at Y = 0 with a 50 cm radius
+		}
+		MinSpeed = FMath::Min(MinSpeed, Fish->CurrentSpeed());
+		const FQuat Now = Fish->GetActorQuat();
+		MaxFacingStepDeg = FMath::Max(MaxFacingStepDeg, FMath::RadiansToDegrees(
+			FMath::Acos(FMath::Clamp(static_cast<float>(FVector::DotProduct(Prev.GetAxisX(), Now.GetAxisX())), -1.f, 1.f))));
+		Prev = Now;
+	}
+	AddInfo(FString::Printf(TEXT("min speed %.1f cm/s (max %.1f), largest nose swing %.1f deg"), MinSpeed, Fish->MaxSpeed, MaxFacingStepDeg));
+	TestTrue(TEXT("the window actually covered the prop passage"), bPassedProp);
+	TestTrue(FString::Printf(TEXT("speed never collapsed (min %.1f, floor %.1f)"), MinSpeed, Fish->MaxSpeed * 0.8f), MinSpeed > Fish->MaxSpeed * 0.8f);
+	return TestTrue(FString::Printf(TEXT("no facing snap (largest swing %.1f deg)"), MaxFacingStepDeg), MaxFacingStepDeg < 45.f);
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

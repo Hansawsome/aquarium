@@ -9,6 +9,7 @@
 #include "aquarium/Facing.h"
 #include "aquarium/Heading.h"
 #include "aquarium/Motion.h"
+#include "aquarium/Obstacles.h"
 #include "aquarium/SwimAnimation.h"
 #include "aquarium/SwimPlane.h"
 #include "aquarium/Wander.h"
@@ -57,6 +58,8 @@ public:
 	// wander target. Not 1.0 on purpose: at 1.0 a whole species congeals into one block, and the
 	// remaining wander is what keeps the group loose. Tune this from the clip, not from a still.
 	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "0", ClampMax = "1")) float SchoolWeight = 0.55f;
+	// How far along world X a prop may be and still count as intersecting this fish's plane.
+	UPROPERTY(EditAnywhere, Category = "Swim") float ObstaclePlaneHalfDepth = 40.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") TObjectPtr<USkeletalMesh> FishMesh = nullptr;
 	// True for the fish spawned by the game mode for the active player session (F-14).
 	UPROPERTY(VisibleAnywhere, Category = "Swim") bool bIsPlayerFish = false;
@@ -119,6 +122,11 @@ private:
 	// straight in would pick an arbitrary six fish. Kept as a member so the per-tick cost is a
 	// sort of a handful of already-gated neighbours and no allocation.
 	std::vector<aquarium::BoidNeighbor> NeighborScratch;
+	// Built ONCE in InitializeSwim. Every fish's plane X is fixed for its whole life, so the
+	// "which props reach my plane" question has a constant answer; only a handful of discs
+	// survive, which is why per-tick obstacle cost is a few circle tests and never 22.
+	std::vector<aquarium::Obstacle> PlaneObstacles;
+	aquarium::ObstacleParams ObstacleParamsValue;
 	TOptional<aquarium::WanderBehavior> Wander; // WanderBehavior has no default ctor
 	float SwimPhase = 0.f;   // accumulated wave phase (rad), advanced per tick
 	float LastHeadingDeg = 0.f;

@@ -72,6 +72,14 @@ void AFishActor::InitializeSwim()
 	FacingParamsValue.steepRollRateDegPerSec = SteepRollRate;
 	FacingParamsValue.steepBeginSin = SteepBeginSin;
 	SpeciesKeyValue = ComputeSpeciesKey();
+	PlaneObstacles.clear();
+	if (UWorld* W = GetWorld())
+	{
+		if (UFishSchoolSubsystem* School = W->GetSubsystem<UFishSchoolSubsystem>())
+		{
+			School->BuildObstaclesForPlane(PlaneOrigin, ObstaclePlaneHalfDepth, PlaneObstacles);
+		}
+	}
 	Wander.Emplace(Seed, Area, /*arriveRadius*/ 15.f, /*targetLifetime*/ 8.f);
 	SwimPhase = 0.f;
 	InputDirection = {0.f, 0.f};
@@ -123,6 +131,26 @@ void AFishActor::StepSwim(float DeltaSeconds)
 					BoidsParamsValue);
 				Desired = aquarium::BlendSteering(Desired, R.steer, SchoolWeight);
 			}
+		}
+	}
+	// Props, before the boundary rule so the wall always gets the last word: obstacle avoidance
+	// must never be able to push a fish out of its plane (M3 pinned "no escape at any aspect
+	// ratio"). Unlike schooling this DOES apply to the player fish: schooling would break the
+	// predictability the arrow keys owe the child, but nothing is gained by letting the biggest
+	// fish on screen pass through a rock. The lane rule keeps props off the player's plane
+	// anyway, so this is insurance that usually does nothing.
+	// Like SteerAlongBoundary, this preserves the magnitude of the desired direction -- killing
+	// the blocked component would let the velocity decelerate through zero and flip the facing
+	// 180 degrees, which is the bug M3 had to fix once already.
+	if (!PlaneObstacles.empty())
+	{
+		UWorld* WObs = GetWorld();
+		UFishSchoolSubsystem* SchoolObs = WObs ? WObs->GetSubsystem<UFishSchoolSubsystem>() : nullptr;
+		if (SchoolObs == nullptr || SchoolObs->bPropAvoidanceEnabled)
+		{
+			Desired = aquarium::SteerAroundObstacles(Motion.position, Desired, PlaneObstacles.data(),
+			                                         PlaneObstacles.size(), ObstacleParamsValue);
+
 		}
 	}
 	// The two boundary rules are deliberately different for the player and for background fish.
