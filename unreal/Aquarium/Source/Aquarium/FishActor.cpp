@@ -5,6 +5,31 @@
 #include "Engine/SkeletalMesh.h"
 #include "ReferenceSkeleton.h"
 
+namespace
+{
+// Shortest-arc form of Q, clamped to at most MaxAngleDeg.
+FQuat LimitQuatAngle(const FQuat& InQ, float MaxAngleDeg)
+{
+	FQuat Q = InQ.GetNormalized();
+	// A quaternion and its negation are the same rotation; the one with W >= 0 is the short way
+	// round. Without this, ToAxisAndAngle can report an angle above 180 degrees and the clamp
+	// below would spin the fish the long way.
+	if (Q.W < 0.f)
+	{
+		Q = FQuat(-Q.X, -Q.Y, -Q.Z, -Q.W);
+	}
+	FVector Axis;
+	float AngleRad = 0.f;
+	Q.ToAxisAndAngle(Axis, AngleRad);
+	const float MaxRad = FMath::DegreesToRadians(FMath::Max(MaxAngleDeg, 0.f));
+	if (AngleRad <= MaxRad || Axis.IsNearlyZero())
+	{
+		return Q;
+	}
+	return FQuat(Axis.GetSafeNormal(), MaxRad);
+}
+} // namespace
+
 AFishActor::AFishActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -36,6 +61,11 @@ void AFishActor::InitializeSwim()
 	MotionParamsValue.accel = Accel;
 	MotionParamsValue.decel = Decel;
 	AnimParams.boneCount = SpineBoneNames().Num();
+	FacingParamsValue.maxTurnRateDegPerSec = MaxFacingTurnRate;
+	// Shallow headings keep the M3 rate exactly, so nothing about ordinary swimming changes.
+	FacingParamsValue.uprightRollRateDegPerSec = MaxFacingTurnRate;
+	FacingParamsValue.steepRollRateDegPerSec = SteepRollRate;
+	FacingParamsValue.steepBeginSin = SteepBeginSin;
 	Wander.Emplace(Seed, Area, /*arriveRadius*/ 15.f, /*targetLifetime*/ 8.f);
 	SwimPhase = 0.f;
 	InputDirection = {0.f, 0.f};
@@ -116,15 +146,42 @@ void AFishActor::StepSwim(float DeltaSeconds)
 		// The frame is continuous, but the 2D velocity itself can reverse through zero when the fish
 		// decelerates at a wall and re-accelerates the other way. Slew the facing at a bounded rate so
 		// the body never snaps; the first step after InitializeSwim snaps to its initial heading.
+		// Split the required rotation into a SWING (aims the nose at the new heading) and a TWIST
+		// (rolls the body about the nose-tail axis) and rate-limit them separately.
+		//
+		// QInterpConstantTo treated both as one lump, which is what made the vertical crossing
+		// cost 0.35 s: the frames on either side of straight up differ by a 180 degree twist, and
+		// at 540 deg/s that is ~0.33 s of visible pirouette. The swing limit is unchanged, so
+		// ordinary turning looks exactly as it did in M3; only the twist is allowed to go fast,
+		// and only while the heading is steep enough that the fish is end-on to the camera.
 		const FQuat Current = GetActorQuat();
-		const FQuat Next = bFirstHeading
-			? Target
-			: FMath::QInterpConstantTo(Current, Target, DeltaSeconds, FMath::DegreesToRadians(MaxFacingTurnRate));
+		FQuat Next = Target;
+		float AppliedSwingDeg = 0.f;
+		if (!bFirstHeading)
+		{
+			const FVector CurFwd = Current.GetAxisX();
+			const FVector TgtFwd = Target.GetAxisX();
+			// FindBetweenNormals on exactly opposed forwards picks an arbitrary perpendicular
+			// axis. That is fine here: the result is still a 180 degree swing, and the clamp
+			// below spreads it over many frames at MaxFacingTurnRate.
+			const FQuat SwingFull = FQuat::FindBetweenNormals(CurFwd, TgtFwd);
+			const FQuat TwistFull = Target * (SwingFull * Current).Inverse();
+			const FQuat Swing = LimitQuatAngle(SwingFull, aquarium::MaxSwingStepDeg(FacingParamsValue, DeltaSeconds));
+			// F.z is the vertical component of the unit forward vector, i.e. sin(pitch).
+			const FQuat Twist = LimitQuatAngle(TwistFull, aquarium::MaxTwistStepDeg(F.z, FacingParamsValue, DeltaSeconds));
+			Next = Twist * Swing * Current;
+			Next.Normalize();
+			AppliedSwingDeg = FMath::RadiansToDegrees(
+				FMath::Acos(FMath::Clamp(static_cast<float>(FVector::DotProduct(CurFwd, Next.GetAxisX())), -1.f, 1.f)));
+		}
 		SetActorRotation(Next);
 
 		if (!bFirstHeading)
 		{
-			const float AppliedTurnRate = FMath::RadiansToDegrees(Current.AngularDistance(Next)) / DeltaSeconds;
+			// The body bend follows the SWING only. A twist is the body rotating about its own
+			// long axis; there is no reason for that to curl the tail, and feeding the lumped
+			// angular distance in would have spiked the bend during the vertical crossing.
+			const float AppliedTurnRate = AppliedSwingDeg / DeltaSeconds;
 			TargetTurnRate = FMath::Sign(RawTurnRate) * FMath::Min(AppliedTurnRate, MaxFacingTurnRate);
 		}
 	}

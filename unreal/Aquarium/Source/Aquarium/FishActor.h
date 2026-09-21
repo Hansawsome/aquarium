@@ -5,6 +5,7 @@
 #include "Components/PoseableMeshComponent.h"
 
 #include "aquarium/Bounds.h"
+#include "aquarium/Facing.h"
 #include "aquarium/Heading.h"
 #include "aquarium/Motion.h"
 #include "aquarium/SwimAnimation.h"
@@ -42,6 +43,15 @@ public:
 	// (deg/s^2) of the turn rate fed to the body bend. Note: FMath::QInterpConstantTo caps a single
 	// step at 1 rad regardless of DeltaSeconds, so on hitch frames the effective cap is ~57 deg.
 	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "1")) float MaxFacingTurnRate = 540.f;
+	// Twist (roll about the nose-tail axis) is rate-limited SEPARATELY from the swing that aims
+	// the nose. A plane-bound fish that keeps its dorsal fin up has a facing frame that is
+	// discontinuous at the two vertical headings -- crossing straight up costs a 180 degree twist,
+	// which at MaxFacingTurnRate took 0.35 s and read as the pirouette recorded since M2. The
+	// twist cannot be removed (it is topology), so it is spent fast while the fish is steep and
+	// therefore end-on to the fixed camera, where it cannot be read as a roll.
+	// See aquarium::FacingParams and docs/superpowers/specs/2026-09-21-m4c-schooling-design.md.
+	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "1")) float SteepRollRate = 2880.f;
+	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "0", ClampMax = "0.999")) float SteepBeginSin = 0.70f;
 	UPROPERTY(EditAnywhere, Category = "Swim") TObjectPtr<USkeletalMesh> FishMesh = nullptr;
 	// True for the fish spawned by the game mode for the active player session (F-14).
 	UPROPERTY(VisibleAnywhere, Category = "Swim") bool bIsPlayerFish = false;
@@ -88,6 +98,7 @@ private:
 	aquarium::MotionState Motion;
 	aquarium::MotionParams MotionParamsValue;
 	aquarium::SwimAnimParams AnimParams;
+	aquarium::FacingParams FacingParamsValue;
 	TOptional<aquarium::WanderBehavior> Wander; // WanderBehavior has no default ctor
 	float SwimPhase = 0.f;   // accumulated wave phase (rad), advanced per tick
 	float LastHeadingDeg = 0.f;

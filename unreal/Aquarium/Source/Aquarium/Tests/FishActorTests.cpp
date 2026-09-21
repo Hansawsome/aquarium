@@ -5,6 +5,7 @@
 #include "Tests/AutomationEditorCommon.h"
 #include "Engine/World.h"
 #include "FishActor.h"
+#include "aquarium/Facing.h"
 
 namespace
 {
@@ -140,19 +141,45 @@ bool FFishActorFacingIsContinuous::RunTest(const FString&)
 	Fish->PlaneHalfHeight = 150.f;
 	Fish->InitializeSwim();
 
-	// Bound: the facing slews at MaxFacingTurnRate (540 deg/s default) = 27 deg per 0.05 s step, so
-	// 45 deg per frame must never be exceeded, even when the 2D velocity reverses through zero at a wall.
+	// The old bound was a single lumped quaternion distance, which could not distinguish the nose
+	// sweeping from the body twisting. The twist across a vertical heading now deliberately
+	// exceeds that lump, so the bound is split into the two things it was really standing in for.
+	// Both limits are DERIVED from the rules-layer functions rather than re-typed here: a bound
+	// copied into the test is a bound that can silently disagree with the code it guards.
 	constexpr float Dt = 0.05f;
-	const float MaxTurnDegPerFrame = FMath::Min(45.f, Fish->MaxFacingTurnRate * Dt + 1.f);
-	// The first step picks the initial heading from rest, so start measuring after it.
+	aquarium::FacingParams FP;
+	FP.maxTurnRateDegPerSec = Fish->MaxFacingTurnRate;
+	FP.uprightRollRateDegPerSec = Fish->MaxFacingTurnRate;
+	FP.steepRollRateDegPerSec = Fish->SteepRollRate;
+	FP.steepBeginSin = Fish->SteepBeginSin;
+	const float MaxSwingDeg = aquarium::MaxSwingStepDeg(FP, Dt) + 1.f;
+
 	Fish->StepSwim(Dt);
 	FQuat PrevQuat = Fish->GetActorQuat();
 	for (int i = 1; i < 300; ++i)
 	{
 		Fish->StepSwim(Dt);
 		const FQuat Now = Fish->GetActorQuat();
-		const float StepDeg = FMath::RadiansToDegrees(PrevQuat.AngularDistance(Now));
-		if (!TestTrue(FString::Printf(TEXT("step %d: facing jumped %.1f deg (limit %.0f)"), i, StepDeg, MaxTurnDegPerFrame), StepDeg < MaxTurnDegPerFrame))
+		// (1) the nose may never sweep faster than MaxFacingTurnRate.
+		const float SwingDeg = FMath::RadiansToDegrees(
+			FMath::Acos(FMath::Clamp(static_cast<float>(FVector::DotProduct(PrevQuat.GetAxisX(), Now.GetAxisX())), -1.f, 1.f)));
+		if (!TestTrue(FString::Printf(TEXT("step %d: nose swung %.1f deg (limit %.1f)"), i, SwingDeg, MaxSwingDeg), SwingDeg < MaxSwingDeg))
+		{
+			return false;
+		}
+		// (2) the twist may never exceed what this step's steepness permits. The steepness is
+		// taken from the heading the fish actually ended the step on.
+		const float VerticalSin = static_cast<float>(Now.GetAxisX().Z);
+		const float MaxTwistDeg = aquarium::MaxTwistStepDeg(VerticalSin, FP, Dt) + 1.f;
+		const FQuat Swing = FQuat::FindBetweenNormals(PrevQuat.GetAxisX(), Now.GetAxisX());
+		FQuat Twist = Now * (Swing * PrevQuat).Inverse();
+		Twist.Normalize();
+		if (Twist.W < 0.f) Twist = FQuat(-Twist.X, -Twist.Y, -Twist.Z, -Twist.W);
+		FVector TwistAxis;
+		float TwistRad = 0.f;
+		Twist.ToAxisAndAngle(TwistAxis, TwistRad);
+		const float TwistDeg = FMath::RadiansToDegrees(TwistRad);
+		if (!TestTrue(FString::Printf(TEXT("step %d: body twisted %.1f deg (limit %.1f at sin %.3f)"), i, TwistDeg, MaxTwistDeg, VerticalSin), TwistDeg < MaxTwistDeg))
 		{
 			return false;
 		}
