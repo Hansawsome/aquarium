@@ -8,6 +8,8 @@ import unreal
 MAP = "/Game/Maps/ReefM1"
 SAND_MATERIAL = "/Game/Env/M_Sand"
 GOBO_MATERIAL = "/Game/Env/M_SurfaceGobo"
+SNOW_MATERIAL = "/Game/Env/M_MarineSnow"
+SNOW_CURTAIN_TAGS = ("near", "mid", "far")
 
 # Must mirror the tuning block in build_reef_m1.py.
 SCHOOL_COUNT = 36
@@ -109,8 +111,32 @@ gobo_mat = ggc.get_material(0)
 assert gobo_mat is not None and gobo_mat.get_path_name().startswith(GOBO_MATERIAL), \
     "gobo material is not M_SurfaceGobo: %s" % (gobo_mat and gobo_mat.get_path_name())
 
+# Marine snow curtains (M4b Task 7): three translucent unlit planes standing across the fixed
+# camera's view. They must be visible (they ARE the effect), must carry a MI_MarineSnow_*
+# instance parented to M_MarineSnow, and must cast nothing -- a shadow-casting translucent
+# curtain would darken the whole reef behind it.
+curtains = [a for a in smas if a.get_actor_label().startswith("SnowCurtain_")]
+assert len(curtains) == len(SNOW_CURTAIN_TAGS), \
+    "expected %d snow curtains, got %d" % (len(SNOW_CURTAIN_TAGS), len(curtains))
+curtain_tags = set()
+for curtain in curtains:
+    label = curtain.get_actor_label()
+    curtain_tags.add(label[len("SnowCurtain_"):])
+    cgc = curtain.static_mesh_component
+    assert cgc.static_mesh is not None, "%s has no static mesh" % label
+    assert cgc.is_visible(), "%s must be visible" % label
+    assert not cgc.get_editor_property("cast_shadow"), "%s must not cast a shadow" % label
+    cmat = cgc.get_material(0)
+    assert isinstance(cmat, unreal.MaterialInstanceConstant), \
+        "%s material is not a MaterialInstanceConstant: %s" % (label, cmat)
+    parent = cmat.get_editor_property("parent")
+    assert parent is not None and parent.get_path_name().startswith(SNOW_MATERIAL), \
+        "%s instance is not parented to M_MarineSnow: %s" % (label, parent)
+assert curtain_tags == set(SNOW_CURTAIN_TAGS), \
+    "snow curtain tags are %s, expected %s" % (sorted(curtain_tags), sorted(SNOW_CURTAIN_TAGS))
+
 # Reef props: every other StaticMeshActor. Known meshes, clear of the camera lane.
-props = [a for a in smas if a is not floor and a is not gobo]
+props = [a for a in smas if a is not floor and a is not gobo and a not in curtains]
 assert len(props) == PROP_COUNT, "expected %d reef props, got %d" % (PROP_COUNT, len(props))
 prop_mesh_names = set()
 for prop in props:

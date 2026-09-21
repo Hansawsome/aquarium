@@ -150,6 +150,19 @@ PP_AO_RADIUS = 80.0
 # dict(fstop=2.8, focal_distance=220.0) and re-run this script; nothing else changes.
 DOF = None
 
+# Marine snow. NOT Niagara: an emitter graph cannot be built from editor Python (only an empty
+# NiagaraSystem can), so a Niagara version would mean committing a hand-made .uasset, which this
+# project does not do. The camera is fixed, so translucent curtains standing across the view do
+# the job with a fully scripted material graph.
+# (tag, distance X, uniform scale, cell size cm, dot radius, brightness, drift cm/s)
+SNOW_CURTAINS = [
+    ("near", 90.0,  3.0, 26.0, 0.11, 0.55, -7.0),
+    ("mid",  240.0, 7.0, 17.0, 0.13, 0.40, -5.0),
+    ("far",  480.0, 13.0, 11.0, 0.15, 0.28, -3.5),
+]
+SNOW_COLOR = dict(r=0.72, g=0.86, b=0.92, a=1.0)
+SNOW_Z = 130.0
+
 # Caustics: (period cm, direction deg, drift turns/s). Directions are chosen so
 # no pair is within 30 deg of parallel or anti-parallel; periods are
 # non-commensurate. Each wave's phase is warped by the previous wave's sine.
@@ -417,6 +430,139 @@ mel.recompile_material(m_gobo)
 eal.save_loaded_asset(m_gobo)
 
 
+
+def build_marine_snow(m):
+    """Sparse drifting dots from an analytic cell hash -- no texture, no particle system.
+
+    World Y and Z are divided into cells of CellSize cm. Each cell gets one pseudo-random
+    centre from frac(sin(dot(cellId, (12.9898, 78.233))) * 43758.5453), and the pixel's
+    distance to that centre becomes the dot. The whole grid slides along Z at Drift cm/s, so the
+    specks sink the way marine snow does. Unlit + translucent + two-sided (two-sided removes any
+    doubt about which way the plane's normal ended up pointing)."""
+    def node(cls, x, y):
+        return mel.create_material_expression(m, cls, x, y)
+
+    def const(x, y, v):
+        n = node(unreal.MaterialExpressionConstant, x, y)
+        n.set_editor_property("r", v)
+        return n
+
+    def const2(x, y, a, b):
+        n = node(unreal.MaterialExpressionConstant2Vector, x, y)
+        n.set_editor_property("r", a)
+        n.set_editor_property("g", b)
+        return n
+
+    def scalar(x, y, name, default):
+        n = node(unreal.MaterialExpressionScalarParameter, x, y)
+        n.set_editor_property("parameter_name", name)
+        n.set_editor_property("default_value", default)
+        return n
+
+    def mask(src, x, y, r, g, b=False):
+        n = node(unreal.MaterialExpressionComponentMask, x, y)
+        n.set_editor_property("r", r)
+        n.set_editor_property("g", g)
+        n.set_editor_property("b", b)
+        n.set_editor_property("a", False)
+        mel.connect_material_expressions(src, "", n, "")
+        return n
+
+    def binop(cls, a, b, x, y):
+        n = node(cls, x, y)
+        mel.connect_material_expressions(a, "", n, "A")
+        mel.connect_material_expressions(b, "", n, "B")
+        return n
+
+    def unop(cls, a, x, y):
+        n = node(cls, x, y)
+        mel.connect_material_expressions(a, "", n, "")
+        return n
+
+    Mul, Add, Sub, Div = (unreal.MaterialExpressionMultiply, unreal.MaterialExpressionAdd,
+                          unreal.MaterialExpressionSubtract, unreal.MaterialExpressionDivide)
+    Frac, Floor, Sine = (unreal.MaterialExpressionFrac, unreal.MaterialExpressionFloor,
+                         unreal.MaterialExpressionSine)
+    Sat = unreal.MaterialExpressionSaturate
+
+    wpos = node(unreal.MaterialExpressionWorldPosition, -2400, 0)
+    yz = mask(wpos, -2200, 0, False, True, True)          # world (Y, Z)
+    cell = scalar(-2200, 250, "CellSize", 16.0)
+    drift = scalar(-2200, 400, "Drift", -5.0)
+    radius = scalar(-2200, 550, "DotRadius", 0.13)
+    bright = scalar(-2200, 700, "Brightness", 0.4)
+    t = node(unreal.MaterialExpressionTime, -2200, 850)
+
+    # slide the field along Z: offset = (0, drift * t)
+    slide = binop(Mul, drift, t, -2000, 400)
+    offset = node(unreal.MaterialExpressionAppendVector, -1850, 400)
+    mel.connect_material_expressions(const(-2000, 500, 0.0), "", offset, "A")
+    mel.connect_material_expressions(slide, "", offset, "B")
+    moved = binop(Add, yz, offset, -1700, 0)
+    p = binop(Div, moved, cell, -1550, 0)                 # position in cell units
+    cid = unop(Floor, p, -1400, -150)                     # cell id
+    f = unop(Frac, p, -1400, 150)                         # position inside the cell
+
+    # hash: frac(sin(dot(cid, (12.9898, 78.233))) * 43758.5453)
+    dot = node(unreal.MaterialExpressionDotProduct, -1200, -150)
+    mel.connect_material_expressions(cid, "", dot, "A")
+    mel.connect_material_expressions(const2(-1400, -300, 12.9898, 78.233), "", dot, "B")
+    h = unop(Frac, binop(Mul, unop(Sine, dot, -1050, -150),
+                         const(-1050, -50, 43758.5453), -900, -150), -750, -150)
+    # second hash for the other axis, offset so the two are not correlated
+    h2 = unop(Frac, binop(Mul, unop(Sine, binop(Add, dot, const(-1050, 50, 3.7), -1050, 30),
+                                    -900, 30),
+                          const(-900, 130, 24634.6345), -750, 30), -600, 30)
+    # clamp the centres into 0.25..0.75 so dots never straddle a cell edge
+    centre = node(unreal.MaterialExpressionAppendVector, -450, -60)
+    mel.connect_material_expressions(binop(Add, binop(Mul, h, const(-600, -250, 0.5), -450, -150),
+                                           const(-450, -250, 0.25), -300, -150), "", centre, "A")
+    mel.connect_material_expressions(binop(Add, binop(Mul, h2, const(-600, 130, 0.5), -450, 60),
+                                           const(-450, 130, 0.25), -300, 60), "", centre, "B")
+
+    d = node(unreal.MaterialExpressionDistance, -100, 0)
+    mel.connect_material_expressions(f, "", d, "A")
+    mel.connect_material_expressions(centre, "", d, "B")
+    # dot = saturate(1 - d / radius); third hash thins the field so not every cell has a speck
+    fall = unop(Sat, binop(Sub, const(50, 120, 1.0), binop(Div, d, radius, 50, 0), 200, 0), 350, 0)
+    thin = unop(Sat, binop(Mul, binop(Sub, h, const(200, 250, 0.55), 350, 200),
+                           const(350, 300, 6.0), 500, 200), 650, 200)
+    opacity = binop(Mul, binop(Mul, fall, thin, 500, 0), bright, 650, 0)
+
+    colour = node(unreal.MaterialExpressionConstant3Vector, 500, -200)
+    colour.set_editor_property("constant", unreal.LinearColor(**SNOW_COLOR))
+    mel.connect_material_property(binop(Mul, colour, opacity, 800, -200), "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+
+
+m_snow = material("M_MarineSnow")
+m_snow.set_editor_property("material_domain", unreal.MaterialDomain.MD_SURFACE)
+m_snow.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+m_snow.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+m_snow.set_editor_property("two_sided", True)
+build_marine_snow(m_snow)
+mel.recompile_material(m_snow)
+eal.save_loaded_asset(m_snow)
+
+snow_instances = {}
+for tag, _x, _scale, cell_size, dot_r, bright_v, drift_v in SNOW_CURTAINS:
+    mi_path = ENV + "/MI_MarineSnow_" + tag
+    if eal.does_asset_exist(mi_path):
+        mi = unreal.load_asset(mi_path)
+    else:
+        mi = tools.create_asset("MI_MarineSnow_" + tag, ENV,
+                                unreal.MaterialInstanceConstant,
+                                unreal.MaterialInstanceConstantFactoryNew())
+    assert mi is not None, "snow instance creation failed: %s" % mi_path
+    mel.set_material_instance_parent(mi, m_snow)
+    for pname, pval in (("CellSize", cell_size), ("DotRadius", dot_r),
+                        ("Brightness", bright_v), ("Drift", drift_v)):
+        mel.set_material_instance_scalar_parameter_value(mi, pname, pval)
+    eal.save_loaded_asset(mi)
+    snow_instances[tag] = mi
+
+
 # --- level -------------------------------------------------------------------
 # Reuse the existing map (keeps the asset path stable, no ReefM1_1 duplicates)
 # but clear every actor so stale ones never accumulate across runs. Note this
@@ -535,6 +681,20 @@ else:
     pp_set("depth_of_field_fstop", DOF["fstop"])
     pp_set("depth_of_field_focal_distance", DOF["focal_distance"])
 pp.set_editor_property("settings", pp_settings)
+
+# The curtains stand across the fixed camera's view at three depths. They are unlit translucent
+# and cast nothing, so they cannot darken the reef behind them.
+for tag, curtain_x, curtain_scale, _c, _r, _b, _d in SNOW_CURTAINS:
+    curtain = spawn(unreal.StaticMeshActor, (curtain_x, 0.0, SNOW_Z), (90.0, 0.0),
+                    label="SnowCurtain_%s" % tag)
+    cc = curtain.static_mesh_component
+    cc.set_mobility(unreal.ComponentMobility.STATIC)
+    assert cc.set_static_mesh(unreal.load_asset(ENGINE_PLANE)), \
+        "curtain mesh missing: %s" % ENGINE_PLANE
+    cc.set_material(0, snow_instances[tag])
+    curtain.set_actor_scale3d(unreal.Vector(curtain_scale, curtain_scale, 1))
+    cc.set_editor_property("cast_shadow", False)
+    cc.set_editor_property("receives_decals", False)
 
 fish_cls = unreal.load_class(None, FISH_CLASS)
 assert fish_cls is not None, "FishActor class not found (is the C++ module built?)"
