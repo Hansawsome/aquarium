@@ -9,6 +9,12 @@ AFishActor::AFishActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	Body = CreateDefaultSubobject<UPoseableMeshComponent>(TEXT("Body"));
+	// The fish never simulates physics, but the FBX import auto-generates a physics asset whose
+	// per-bone capsules are far fatter than the body (BlueTang: 43.9 x 26.0 cm against a 25.0 x 3.6 cm
+	// mesh). USkinnedMeshComponent::CalcMeshBound prefers that physics AABB in editor builds, so the
+	// component bounds stopped matching what is actually drawn. Fixed bounds take the skeletal mesh's
+	// own bounds instead, which is both what the renderer shows and what a cooked build would use.
+	Body->bComponentUseFixedSkelBounds = true;
 	RootComponent = Body;
 }
 
