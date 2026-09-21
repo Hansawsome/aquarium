@@ -1,9 +1,39 @@
 #include "FishActor.h"
 
+#include "FishSchoolSubsystem.h"
 #include "NameTagComponent.h"
+
+#include "Engine/World.h"
+
+#include <algorithm>
 
 #include "Engine/SkeletalMesh.h"
 #include "ReferenceSkeleton.h"
+
+namespace
+{
+// Shortest-arc form of Q, clamped to at most MaxAngleDeg.
+FQuat LimitQuatAngle(const FQuat& InQ, float MaxAngleDeg)
+{
+	FQuat Q = InQ.GetNormalized();
+	// A quaternion and its negation are the same rotation; the one with W >= 0 is the short way
+	// round. Without this, ToAxisAndAngle can report an angle above 180 degrees and the clamp
+	// below would spin the fish the long way.
+	if (Q.W < 0.f)
+	{
+		Q = FQuat(-Q.X, -Q.Y, -Q.Z, -Q.W);
+	}
+	FVector Axis;
+	float AngleRad = 0.f;
+	Q.ToAxisAndAngle(Axis, AngleRad);
+	const float MaxRad = FMath::DegreesToRadians(FMath::Max(MaxAngleDeg, 0.f));
+	if (AngleRad <= MaxRad || Axis.IsNearlyZero())
+	{
+		return Q;
+	}
+	return FQuat(Axis.GetSafeNormal(), MaxRad);
+}
+} // namespace
 
 AFishActor::AFishActor()
 {
@@ -36,6 +66,20 @@ void AFishActor::InitializeSwim()
 	MotionParamsValue.accel = Accel;
 	MotionParamsValue.decel = Decel;
 	AnimParams.boneCount = SpineBoneNames().Num();
+	FacingParamsValue.maxTurnRateDegPerSec = MaxFacingTurnRate;
+	// Shallow headings keep the M3 rate exactly, so nothing about ordinary swimming changes.
+	FacingParamsValue.uprightRollRateDegPerSec = MaxFacingTurnRate;
+	FacingParamsValue.steepRollRateDegPerSec = SteepRollRate;
+	FacingParamsValue.steepBeginSin = SteepBeginSin;
+	SpeciesKeyValue = ComputeSpeciesKey();
+	PlaneObstacles.clear();
+	if (UWorld* W = GetWorld())
+	{
+		if (UFishSchoolSubsystem* School = W->GetSubsystem<UFishSchoolSubsystem>())
+		{
+			School->BuildObstaclesForPlane(PlaneOrigin, ObstaclePlaneHalfDepth, PlaneObstacles);
+		}
+	}
 	Wander.Emplace(Seed, Area, /*arriveRadius*/ 15.f, /*targetLifetime*/ 8.f);
 	SwimPhase = 0.f;
 	InputDirection = {0.f, 0.f};
@@ -67,7 +111,48 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	// from a current target rather than a stale one.
 	Wander->Update(Motion.position, DeltaSeconds);
 	// Player input replaces the wander target entirely; a zero input coasts the fish to a stop.
-	const aquarium::Vec2 Desired = bPlayerControlled ? InputDirection : Wander->DesiredDirection(Motion.position);
+	aquarium::Vec2 Desired = bPlayerControlled ? InputDirection : Wander->DesiredDirection(Motion.position);
+	// Schooling applies to background fish only. The player's fish is never a boid: arrow keys
+	// must map to motion with nothing mixed in, or the child gets "I pressed left and it went
+	// somewhere else" (F-05/F-07). The other direction -- background fish reacting to the player
+	// -- is handled inside AsNeighbor(), which marks the player fish avoidOnly.
+	if (!bPlayerControlled && !bIsPlayerFish)
+	{
+		UWorld* W = GetWorld();
+		UFishSchoolSubsystem* School = W ? W->GetSubsystem<UFishSchoolSubsystem>() : nullptr;
+		if (School && School->bSchoolingEnabled && School->RegisteredCount() > 1)
+		{
+			const aquarium::Vec2 Shared{Plane.origin.y + Motion.position.x, Plane.origin.z + Motion.position.y};
+			BuildSortedNeighbors(School->Neighbors(), Shared);
+			if (!NeighborScratch.empty())
+			{
+				const aquarium::BoidsResult R = aquarium::SchoolingSteer(
+					Shared, Plane.origin.x, SpeciesKeyValue, NeighborScratch.data(), NeighborScratch.size(),
+					BoidsParamsValue);
+				Desired = aquarium::BlendSteering(Desired, R.steer, SchoolWeight);
+			}
+		}
+	}
+	// Props, before the boundary rule so the wall always gets the last word: obstacle avoidance
+	// must never be able to push a fish out of its plane (M3 pinned "no escape at any aspect
+	// ratio"). Unlike schooling this DOES apply to the player fish: schooling would break the
+	// predictability the arrow keys owe the child, but nothing is gained by letting the biggest
+	// fish on screen pass through a rock. The lane rule keeps props off the player's plane
+	// anyway, so this is insurance that usually does nothing.
+	// Like SteerAlongBoundary, this preserves the magnitude of the desired direction -- killing
+	// the blocked component would let the velocity decelerate through zero and flip the facing
+	// 180 degrees, which is the bug M3 had to fix once already.
+	if (!PlaneObstacles.empty())
+	{
+		UWorld* WObs = GetWorld();
+		UFishSchoolSubsystem* SchoolObs = WObs ? WObs->GetSubsystem<UFishSchoolSubsystem>() : nullptr;
+		if (SchoolObs == nullptr || SchoolObs->bPropAvoidanceEnabled)
+		{
+			Desired = aquarium::SteerAroundObstacles(Motion.position, Desired, PlaneObstacles.data(),
+			                                         PlaneObstacles.size(), ObstacleParamsValue);
+
+		}
+	}
 	// The two boundary rules are deliberately different for the player and for background fish.
 	// Player: AvoidBoundary only cancels the outward component, so pushing into a wall simply stops
 	// the fish. Sliding would add motion along the wall that the child never asked for (holding Left
@@ -116,15 +201,42 @@ void AFishActor::StepSwim(float DeltaSeconds)
 		// The frame is continuous, but the 2D velocity itself can reverse through zero when the fish
 		// decelerates at a wall and re-accelerates the other way. Slew the facing at a bounded rate so
 		// the body never snaps; the first step after InitializeSwim snaps to its initial heading.
+		// Split the required rotation into a SWING (aims the nose at the new heading) and a TWIST
+		// (rolls the body about the nose-tail axis) and rate-limit them separately.
+		//
+		// QInterpConstantTo treated both as one lump, which is what made the vertical crossing
+		// cost 0.35 s: the frames on either side of straight up differ by a 180 degree twist, and
+		// at 540 deg/s that is ~0.33 s of visible pirouette. The swing limit is unchanged, so
+		// ordinary turning looks exactly as it did in M3; only the twist is allowed to go fast,
+		// and only while the heading is steep enough that the fish is end-on to the camera.
 		const FQuat Current = GetActorQuat();
-		const FQuat Next = bFirstHeading
-			? Target
-			: FMath::QInterpConstantTo(Current, Target, DeltaSeconds, FMath::DegreesToRadians(MaxFacingTurnRate));
+		FQuat Next = Target;
+		float AppliedSwingDeg = 0.f;
+		if (!bFirstHeading)
+		{
+			const FVector CurFwd = Current.GetAxisX();
+			const FVector TgtFwd = Target.GetAxisX();
+			// FindBetweenNormals on exactly opposed forwards picks an arbitrary perpendicular
+			// axis. That is fine here: the result is still a 180 degree swing, and the clamp
+			// below spreads it over many frames at MaxFacingTurnRate.
+			const FQuat SwingFull = FQuat::FindBetweenNormals(CurFwd, TgtFwd);
+			const FQuat TwistFull = Target * (SwingFull * Current).Inverse();
+			const FQuat Swing = LimitQuatAngle(SwingFull, aquarium::MaxSwingStepDeg(FacingParamsValue, DeltaSeconds));
+			// F.z is the vertical component of the unit forward vector, i.e. sin(pitch).
+			const FQuat Twist = LimitQuatAngle(TwistFull, aquarium::MaxTwistStepDeg(F.z, FacingParamsValue, DeltaSeconds));
+			Next = Twist * Swing * Current;
+			Next.Normalize();
+			AppliedSwingDeg = FMath::RadiansToDegrees(
+				FMath::Acos(FMath::Clamp(static_cast<float>(FVector::DotProduct(CurFwd, Next.GetAxisX())), -1.f, 1.f)));
+		}
 		SetActorRotation(Next);
 
 		if (!bFirstHeading)
 		{
-			const float AppliedTurnRate = FMath::RadiansToDegrees(Current.AngularDistance(Next)) / DeltaSeconds;
+			// The body bend follows the SWING only. A twist is the body rotating about its own
+			// long axis; there is no reason for that to curl the tail, and feeding the lumped
+			// angular distance in would have spiked the bend during the vertical crossing.
+			const float AppliedTurnRate = AppliedSwingDeg / DeltaSeconds;
 			TargetTurnRate = FMath::Sign(RawTurnRate) * FMath::Min(AppliedTurnRate, MaxFacingTurnRate);
 		}
 	}
@@ -259,10 +371,95 @@ void AFishActor::UpdateNameTagLocation()
 	}
 }
 
+int32 AFishActor::ComputeSpeciesKey() const
+{
+	// Derived from the mesh asset rather than authored as its own property. A species id that the
+	// level script would also have to write is the same duplicated-rule trap that let a prop
+	// radius bug live in BOTH build_reef_m1.py and verify_scene.py until M4b, where the verifier
+	// could never catch it. A fish with no mesh (test spawns) gets 0 and schools with other
+	// mesh-less fish; the tests pin that explicitly rather than leaving it to chance.
+	return FishMesh ? static_cast<int32>(GetTypeHash(FishMesh->GetFName())) : 0;
+}
+
+aquarium::BoidNeighbor AFishActor::AsNeighbor() const
+{
+	aquarium::BoidNeighbor N;
+	// Shared frame: every swim plane uses right = +Y and up = +Z, so adding the plane origin back
+	// gives one common 2D frame that any fish can use a direction from without conversion.
+	N.position = {Plane.origin.y + Motion.position.x, Plane.origin.z + Motion.position.y};
+	N.velocity = Motion.velocity;
+	N.depth = Plane.origin.x;
+	N.species = SpeciesKeyValue;
+	// The player's fish is a neighbour to be avoided, never one to be followed. Attracting the
+	// school to it would crowd exactly the fish the child is watching; ignoring it entirely would
+	// let other species swim through its body.
+	N.avoidOnly = bIsPlayerFish;
+	return N;
+}
+
+// Copies the neighbours that can possibly matter into NeighborScratch, NEAREST FIRST.
+//
+// aquarium::SchoolingSteer stops accumulating alignment/cohesion once maxNeighbors mates have
+// contributed, and it walks the array in order. On a registration-ordered snapshot that cap picks
+// an arbitrary six fish rather than the six nearest ones, so a fish would align with school mates
+// it cannot even see while ignoring the one beside it. Sorting here is the engine side's job: the
+// rules layer stays a pure function of whatever list it is handed.
+void AFishActor::BuildSortedNeighbors(const std::vector<aquarium::BoidNeighbor>& Snapshot,
+                                      const aquarium::Vec2& Shared)
+{
+	NeighborScratch.clear();
+	// Widest radius any neighbour could act through, so the gate never drops one that would have
+	// contributed separation.
+	const float MaxRadius = FMath::Max3(BoidsParamsValue.neighborRadius, BoidsParamsValue.separationRadius,
+	                                    BoidsParamsValue.avoidOnlyRadius);
+	const float MaxRadiusSq = MaxRadius * MaxRadius;
+	for (const aquarium::BoidNeighbor& N : Snapshot)
+	{
+		if (FMath::Abs(N.depth - Plane.origin.x) > BoidsParamsValue.depthRadius)
+		{
+			continue;
+		}
+		const float Dx = N.position.x - Shared.x;
+		const float Dy = N.position.y - Shared.y;
+		const float DistSq = Dx * Dx + Dy * Dy;
+		if (DistSq <= 1e-8f || DistSq > MaxRadiusSq)
+		{
+			continue;   // self, or too far for any rule to reach
+		}
+		NeighborScratch.push_back(N);
+	}
+	std::sort(NeighborScratch.begin(), NeighborScratch.end(),
+		[&Shared](const aquarium::BoidNeighbor& A, const aquarium::BoidNeighbor& B)
+		{
+			const float Ax = A.position.x - Shared.x, Ay = A.position.y - Shared.y;
+			const float Bx = B.position.x - Shared.x, By = B.position.y - Shared.y;
+			return (Ax * Ax + Ay * Ay) < (Bx * Bx + By * By);
+		});
+}
+
+void AFishActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* W = GetWorld())
+	{
+		if (UFishSchoolSubsystem* School = W->GetSubsystem<UFishSchoolSubsystem>())
+		{
+			School->Unregister(this);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
 void AFishActor::BeginPlay()
 {
 	Super::BeginPlay();
 	InitializeSwim();
+	if (UWorld* W = GetWorld())
+	{
+		if (UFishSchoolSubsystem* School = W->GetSubsystem<UFishSchoolSubsystem>())
+		{
+			School->Register(this);
+		}
+	}
 }
 
 void AFishActor::Tick(float DeltaSeconds)

@@ -5,6 +5,12 @@
 #include "Tests/AutomationEditorCommon.h"
 #include "Engine/World.h"
 #include "FishActor.h"
+#include "FishSchoolSubsystem.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
+#include "aquarium/Boids.h"
+#include "aquarium/Facing.h"
 
 namespace
 {
@@ -140,19 +146,45 @@ bool FFishActorFacingIsContinuous::RunTest(const FString&)
 	Fish->PlaneHalfHeight = 150.f;
 	Fish->InitializeSwim();
 
-	// Bound: the facing slews at MaxFacingTurnRate (540 deg/s default) = 27 deg per 0.05 s step, so
-	// 45 deg per frame must never be exceeded, even when the 2D velocity reverses through zero at a wall.
+	// The old bound was a single lumped quaternion distance, which could not distinguish the nose
+	// sweeping from the body twisting. The twist across a vertical heading now deliberately
+	// exceeds that lump, so the bound is split into the two things it was really standing in for.
+	// Both limits are DERIVED from the rules-layer functions rather than re-typed here: a bound
+	// copied into the test is a bound that can silently disagree with the code it guards.
 	constexpr float Dt = 0.05f;
-	const float MaxTurnDegPerFrame = FMath::Min(45.f, Fish->MaxFacingTurnRate * Dt + 1.f);
-	// The first step picks the initial heading from rest, so start measuring after it.
+	aquarium::FacingParams FP;
+	FP.maxTurnRateDegPerSec = Fish->MaxFacingTurnRate;
+	FP.uprightRollRateDegPerSec = Fish->MaxFacingTurnRate;
+	FP.steepRollRateDegPerSec = Fish->SteepRollRate;
+	FP.steepBeginSin = Fish->SteepBeginSin;
+	const float MaxSwingDeg = aquarium::MaxSwingStepDeg(FP, Dt) + 1.f;
+
 	Fish->StepSwim(Dt);
 	FQuat PrevQuat = Fish->GetActorQuat();
 	for (int i = 1; i < 300; ++i)
 	{
 		Fish->StepSwim(Dt);
 		const FQuat Now = Fish->GetActorQuat();
-		const float StepDeg = FMath::RadiansToDegrees(PrevQuat.AngularDistance(Now));
-		if (!TestTrue(FString::Printf(TEXT("step %d: facing jumped %.1f deg (limit %.0f)"), i, StepDeg, MaxTurnDegPerFrame), StepDeg < MaxTurnDegPerFrame))
+		// (1) the nose may never sweep faster than MaxFacingTurnRate.
+		const float SwingDeg = FMath::RadiansToDegrees(
+			FMath::Acos(FMath::Clamp(static_cast<float>(FVector::DotProduct(PrevQuat.GetAxisX(), Now.GetAxisX())), -1.f, 1.f)));
+		if (!TestTrue(FString::Printf(TEXT("step %d: nose swung %.1f deg (limit %.1f)"), i, SwingDeg, MaxSwingDeg), SwingDeg < MaxSwingDeg))
+		{
+			return false;
+		}
+		// (2) the twist may never exceed what this step's steepness permits. The steepness is
+		// taken from the heading the fish actually ended the step on.
+		const float VerticalSin = static_cast<float>(Now.GetAxisX().Z);
+		const float MaxTwistDeg = aquarium::MaxTwistStepDeg(VerticalSin, FP, Dt) + 1.f;
+		const FQuat Swing = FQuat::FindBetweenNormals(PrevQuat.GetAxisX(), Now.GetAxisX());
+		FQuat Twist = Now * (Swing * PrevQuat).Inverse();
+		Twist.Normalize();
+		if (Twist.W < 0.f) Twist = FQuat(-Twist.X, -Twist.Y, -Twist.Z, -Twist.W);
+		FVector TwistAxis;
+		float TwistRad = 0.f;
+		Twist.ToAxisAndAngle(TwistAxis, TwistRad);
+		const float TwistDeg = FMath::RadiansToDegrees(TwistRad);
+		if (!TestTrue(FString::Printf(TEXT("step %d: body twisted %.1f deg (limit %.1f at sin %.3f)"), i, TwistDeg, MaxTwistDeg, VerticalSin), TwistDeg < MaxTwistDeg))
 		{
 			return false;
 		}
@@ -313,6 +345,384 @@ bool FFishActorPlayerStopsAtWall::RunTest(const FString&)
 	TestTrue(FString::Printf(TEXT("rides the plane edge (%.2f cm from it)"), DistanceFromEdge),
 		DistanceFromEdge <= Fish->PlayerAvoidDistance + 1.f);
 	return true;
+}
+
+// Diagnoses (and, after Task 5, guards) the vertical-transition pirouette recorded since M2.
+//
+// The fish is driven by hand through a heading sweep that crosses straight up: up-and-right,
+// then straight up, then up-and-left. The facing frame is MakeFromXZ(Fwd, worldUp), whose local
+// Z flips sign the moment the lateral component of an almost vertical heading changes sign, so
+// the two frames differ by a 180 degree twist about the (almost vertical) forward axis.
+//
+// Twist is measured as the rotation about the forward axis, separated from the swing that aims
+// the nose -- the same decomposition StepSwim uses.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorNoLongTwistAcrossVertical, "Aquarium.Fish.FacingHasNoLongTwistAcrossVertical",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorNoLongTwistAcrossVertical::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnFish(World, 11u);
+	Fish->bPlayerControlled = true;   // drive the heading by hand, no wander in the way
+	Fish->PlaneHalfWidth = 400.f;
+	Fish->PlaneHalfHeight = 400.f;
+	Fish->InitializeSwim();
+
+	constexpr float Dt = 1.f / 60.f;
+	// Hold each direction long enough for the velocity to actually reach it.
+	const TArray<FVector2D> Legs = {FVector2D(0.35f, 1.f), FVector2D(0.f, 1.f), FVector2D(-0.35f, 1.f)};
+	float TotalTwistDeg = 0.f;
+	int TwistingSteps = 0;
+	float PeakTwistRate = 0.f;
+
+	Fish->SetInputDirection(Legs[0]);
+	for (int i = 0; i < 90; ++i) Fish->StepSwim(Dt);   // settle onto the first heading
+
+	FQuat Prev = Fish->GetActorQuat();
+	for (int Leg = 1; Leg < Legs.Num(); ++Leg)
+	{
+		Fish->SetInputDirection(Legs[Leg]);
+		for (int i = 0; i < 120; ++i)
+		{
+			Fish->StepSwim(Dt);
+			const FQuat Now = Fish->GetActorQuat();
+			// Swing takes Prev's forward to Now's forward; whatever is left is twist.
+			const FQuat Swing = FQuat::FindBetweenNormals(Prev.GetAxisX(), Now.GetAxisX());
+			FQuat Twist = Now * (Swing * Prev).Inverse();
+			Twist.Normalize();
+			if (Twist.W < 0.f) Twist = FQuat(-Twist.X, -Twist.Y, -Twist.Z, -Twist.W);
+			FVector Axis; float AngleRad;
+			Twist.ToAxisAndAngle(Axis, AngleRad);
+			const float StepTwistDeg = FMath::RadiansToDegrees(AngleRad);
+			if (StepTwistDeg > 0.5f)
+			{
+				TotalTwistDeg += StepTwistDeg;
+				++TwistingSteps;
+				PeakTwistRate = FMath::Max(PeakTwistRate, StepTwistDeg / Dt);
+			}
+			Prev = Now;
+		}
+	}
+
+	// The flip itself is unavoidable, so this does NOT assert that no twist happens. It asserts
+	// that the twist never drags on: at the steep rate 180 degrees fits in 0.07 s, which is 5
+	// steps at 60 fps. The defect took 0.33 s, i.e. 20 steps.
+	const float ElapsedSec = static_cast<float>(TwistingSteps) * Dt;
+	AddInfo(FString::Printf(TEXT("twist total %.1f deg over %d steps (%.3f s), peak %.0f deg/s"),
+		TotalTwistDeg, TwistingSteps, ElapsedSec, PeakTwistRate));
+	return TestTrue(FString::Printf(TEXT("twist across vertical took %.3f s (limit 0.12 s), total %.1f deg"), ElapsedSec, TotalTwistDeg),
+		ElapsedSec < 0.12f);
+}
+
+namespace
+{
+// Registers a fish with the world's school subsystem and parks it at a fixed plane position.
+AFishActor* SchoolFish(UWorld* World, uint32 Seed, const FVector& Origin, USkeletalMesh* Mesh)
+{
+	AFishActor* Fish = SpawnFish(World, Seed);
+	Fish->PlaneOrigin = Origin;
+	Fish->PlaneHalfWidth = 400.f;
+	Fish->PlaneHalfHeight = 400.f;
+	Fish->FishMesh = Mesh;
+	Fish->InitializeSwim();
+	World->GetSubsystem<UFishSchoolSubsystem>()->Register(Fish);
+	return Fish;
+}
+} // namespace
+
+namespace
+{
+// Runs three same-species fish, 120 cm apart, for 20 simulated seconds at the given school weight
+// and returns the MEAN spread of the outer pair over the second half.
+//
+// Mean, not final: one final sample lands wherever the wander cycle happens to be. Second half,
+// not the whole run: the group starts 240 cm apart by construction, and no steering can compress
+// that instantly, so including the settling phase buries the difference being measured (a peak
+// over the whole run reads 240 for both weights -- measured).
+float SteadyOuterSpread(UWorld* World, USkeletalMesh* Mesh, float Weight)
+{
+	AFishActor* A = SchoolFish(World, 3u, FVector(400.f, -120.f, 150.f), Mesh);
+	AFishActor* B = SchoolFish(World, 4u, FVector(400.f, 0.f, 150.f), Mesh);
+	AFishActor* C = SchoolFish(World, 5u, FVector(400.f, 120.f, 150.f), Mesh);
+	A->SchoolWeight = Weight;
+	B->SchoolWeight = Weight;
+	C->SchoolWeight = Weight;
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	double Sum = 0.0;
+	int Samples = 0;
+	for (int i = 0; i < 400; ++i)
+	{
+		School->InvalidateSnapshot();
+		A->StepSwim(0.05f);
+		B->StepSwim(0.05f);
+		C->StepSwim(0.05f);
+		if (i >= 200)
+		{
+			Sum += FMath::Abs(A->GetActorLocation().Y - C->GetActorLocation().Y);
+			++Samples;
+		}
+	}
+	return static_cast<float>(Sum / FMath::Max(Samples, 1));
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorSchoolMatesPullTogether, "Aquarium.Fish.SchoolMatesPullTogether",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorSchoolMatesPullTogether::RunTest(const FString&)
+{
+	USkeletalMesh* Tang = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Tang)) return false;
+
+	// The same three seeds are run twice, in two fresh worlds, differing ONLY in SchoolWeight.
+	//
+	// The plan's version of this test asserted a single absolute limit (spread < 400 cm) against
+	// the schooled run alone. That guard was vacuous: with SchoolWeight forced to 0 these seeds
+	// still came in at 129 cm, so the test passed with schooling switched off entirely and could
+	// never have caught a broken wiring. Comparing the two runs makes the assertion about
+	// schooling rather than about the seeds.
+	UWorld* Loose = FAutomationEditorCommonUtils::CreateNewMap();
+	const float Unschooled = SteadyOuterSpread(Loose, Tang, 0.f);
+	UWorld* Tight = FAutomationEditorCommonUtils::CreateNewMap();
+	const float Schooled = SteadyOuterSpread(Tight, Tang, 0.55f);
+	TestEqual(TEXT("three fish registered"), Tight->GetSubsystem<UFishSchoolSubsystem>()->RegisteredCount(), 3);
+
+	AddInfo(FString::Printf(TEXT("steady outer spread: unschooled %.1f cm, schooled %.1f cm (ratio %.2f)"),
+		Unschooled, Schooled, Schooled / FMath::Max(Unschooled, 1.f)));
+	// Cohesion must visibly tighten the group, and must also hold it inside roughly one neighbour
+	// radius plus the separation the school keeps between its members.
+	TestTrue(FString::Printf(TEXT("schooling tightened the group (%.1f vs %.1f cm)"), Schooled, Unschooled),
+		Schooled < Unschooled * 0.75f);
+	return TestTrue(FString::Printf(TEXT("school stayed together (mean %.1f cm, limit 250)"), Schooled),
+		Schooled < 250.f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorOtherSpeciesDoNotPull, "Aquarium.Fish.OtherSpeciesDoNotPull",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorOtherSpeciesDoNotPull::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	USkeletalMesh* Tang = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	USkeletalMesh* Clown = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/Clownfish/SK_Clownfish.SK_Clownfish"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Tang)) return false;
+	if (!TestNotNull(TEXT("SK_Clownfish loads"), Clown)) return false;
+
+	AFishActor* A = SchoolFish(World, 3u, FVector(400.f, 0.f, 150.f), Tang);
+	AFishActor* B = SchoolFish(World, 4u, FVector(400.f, 100.f, 150.f), Clown);
+	TestNotEqual(TEXT("species keys differ"), A->SpeciesKey(), B->SpeciesKey());
+
+	// A blue tang 100 cm from a clownfish is inside neighborRadius but outside separationRadius,
+	// so the clownfish must contribute exactly nothing to the tang's steer.
+	const aquarium::BoidNeighbor N = B->AsNeighbor();
+	aquarium::BoidsParams P;
+	const aquarium::BoidsResult R = aquarium::SchoolingSteer(A->AsNeighbor().position, A->AsNeighbor().depth,
+		A->SpeciesKey(), &N, 1, P);
+	TestEqual(TEXT("no alignment/cohesion from another species"), R.consideredCount, 0);
+	TestEqual(TEXT("no separation at 100 cm from another species"), R.avoidCount, 0);
+	// But at 20 cm it IS separated from: a clownfish must not swim through a blue tang.
+	B->PlaneOrigin = FVector(400.f, 20.f, 150.f);
+	B->InitializeSwim();
+	const aquarium::BoidNeighbor Close = B->AsNeighbor();
+	const aquarium::BoidsResult R2 = aquarium::SchoolingSteer(A->AsNeighbor().position, A->AsNeighbor().depth,
+		A->SpeciesKey(), &Close, 1, P);
+	TestEqual(TEXT("separation from another species at 20 cm"), R2.avoidCount, 1);
+	return TestTrue(TEXT("pushed away from the other species"), R2.steer.x < -0.9f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorPlayerFishIsAvoidedNotFollowed, "Aquarium.Fish.PlayerFishIsAvoidedNotFollowed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorPlayerFishIsAvoidedNotFollowed::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	USkeletalMesh* Tang = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Tang)) return false;
+
+	AFishActor* Background = SchoolFish(World, 3u, FVector(400.f, 0.f, 150.f), Tang);
+	AFishActor* Player = SchoolFish(World, 4u, FVector(400.f, 90.f, 150.f), Tang);  // SAME species
+	Player->bIsPlayerFish = true;
+
+	const aquarium::BoidNeighbor N = Player->AsNeighbor();
+	TestTrue(TEXT("the player fish is marked avoidOnly"), N.avoidOnly);
+	aquarium::BoidsParams P;
+	const aquarium::BoidsResult R = aquarium::SchoolingSteer(Background->AsNeighbor().position,
+		Background->AsNeighbor().depth, Background->SpeciesKey(), &N, 1, P);
+	TestEqual(TEXT("never a cohesion/alignment target, even same species"), R.consideredCount, 0);
+	TestEqual(TEXT("avoided at 90 cm (avoidOnlyRadius 110)"), R.avoidCount, 1);
+	return TestTrue(TEXT("the school opens away from the player fish"), R.steer.x < -0.9f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorPlayerFishIgnoresSchooling, "Aquarium.Fish.PlayerFishIgnoresSchooling",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorPlayerFishIgnoresSchooling::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	USkeletalMesh* Tang = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Tang)) return false;
+
+	// A crowd of same-species fish sits hard to the LEFT of the player fish. If the player fish
+	// were a boid at all, cohesion would bend it left. It must go exactly where the key says.
+	AFishActor* Player = SchoolFish(World, 9u, FVector(400.f, 0.f, 150.f), Tang);
+	Player->bIsPlayerFish = true;
+	Player->bPlayerControlled = true;
+	Player->SetInputDirection(FVector2D(1.f, 0.f));   // screen right
+	for (int i = 0; i < 6; ++i)
+	{
+		SchoolFish(World, 20u + static_cast<uint32>(i), FVector(400.f, -100.f - 15.f * i, 150.f), Tang);
+	}
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	const FVector Before = Player->GetActorLocation();
+	for (int i = 0; i < 40; ++i)
+	{
+		School->InvalidateSnapshot();
+		Player->StepSwim(0.05f);
+	}
+	const FVector After = Player->GetActorLocation();
+	TestTrue(TEXT("moved right as instructed"), After.Y - Before.Y > 5.f);
+	return TestTrue(FString::Printf(TEXT("did not drift vertically (dz = %.3f)"), After.Z - Before.Z),
+		FMath::Abs(After.Z - Before.Z) < 2.f);
+}
+
+namespace
+{
+// Spawns a tagged box prop at a world location, sized like a coral.
+AStaticMeshActor* SpawnProp(UWorld* World, const FVector& Location, const FVector& Scale)
+{
+	AStaticMeshActor* Prop = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Location, FRotator::ZeroRotator);
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	Prop->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+	Prop->GetStaticMeshComponent()->SetStaticMesh(Cube);
+	Prop->SetActorScale3D(Scale);
+	Prop->Tags.Add(UFishSchoolSubsystem::PropTag);
+	return Prop;
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorObstaclesDerivedFromPropBounds, "Aquarium.Fish.ObstaclesDerivedFromPropBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorObstaclesDerivedFromPropBounds::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	// /Engine/BasicShapes/Cube is 100 cm, so scale 1 gives half extents of 50 cm.
+	SpawnProp(World, FVector(400.f, 100.f, 60.f), FVector(1.f, 1.f, 3.f));   // reaches the plane
+	SpawnProp(World, FVector(900.f, 100.f, 60.f), FVector(1.f, 1.f, 1.f));   // 5 m away in depth
+	// A collapsed bound is not a small obstacle: with the rule's 20 cm margin it would become an
+	// invisible wall. It must produce no discs at all.
+	SpawnProp(World, FVector(400.f, -150.f, 150.f), FVector(1.f, 0.f, 0.f));
+
+	std::vector<aquarium::Obstacle> Obs;
+	School->BuildObstaclesForPlane(FVector(400.f, 0.f, 150.f), 40.f, Obs);
+	TestTrue(TEXT("the distant prop and the degenerate prop are filtered out"),
+		Obs.size() <= static_cast<size_t>(UFishSchoolSubsystem::MaxDiscsPerProp));
+	if (!TestTrue(TEXT("the near prop produced discs"), !Obs.empty())) return false;
+	for (const aquarium::Obstacle& O : Obs)
+	{
+		TestTrue(TEXT("no ghost disc from a degenerate bound"), O.center.x > 0.f);
+	}
+	// Radius is the HALF WIDTH of the actual bounds (50 cm), derived, not a copied table value.
+	TestTrue(FString::Printf(TEXT("radius %.1f is the actor's half width"), Obs[0].radius), FMath::IsNearlyEqual(Obs[0].radius, 50.f, 1.f));
+	// A 150 cm half-height prop against a 50 cm radius asks for 3 discs.
+	TestEqual(TEXT("a tall prop is a stack, not one fat disc"), static_cast<int32>(Obs.size()), 3);
+	// Plane-local: the prop is at world Y = 100 and the plane origin at Y = 0.
+	return TestTrue(FString::Printf(TEXT("disc centre x %.1f is plane-local"), Obs[0].center.x), FMath::IsNearlyEqual(Obs[0].center.x, 100.f, 1.f));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorSwimsAroundProp, "Aquarium.Fish.SwimsAroundPropInsteadOfThrough",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorSwimsAroundProp::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	SpawnProp(World, FVector(400.f, 0.f, 150.f), FVector(1.f, 1.f, 1.f));   // dead ahead, r = 50
+
+	AFishActor* Fish = SpawnFish(World, 5u);
+	Fish->bPlayerControlled = true;
+	Fish->PlaneOrigin = FVector(400.f, -250.f, 150.f);
+	Fish->PlaneHalfWidth = 400.f;
+	Fish->PlaneHalfHeight = 200.f;
+	Fish->InitializeSwim();
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));   // straight at the prop
+
+	float MinDist = 1e9f;
+	for (int i = 0; i < 400; ++i)
+	{
+		Fish->StepSwim(0.05f);
+		const FVector L = Fish->GetActorLocation();
+		MinDist = FMath::Min(MinDist, static_cast<float>(FVector2D(L.Y - 0.f, L.Z - 150.f).Size()));
+	}
+	AddInfo(FString::Printf(TEXT("closest approach %.1f cm to a 50 cm prop"), MinDist));
+	// Clearance, not contact: the fish must turn BEFORE it arrives. 50 cm radius, and the rule
+	// adds a 20 cm margin, so anything under 50 means it went through the solid part.
+	return TestTrue(FString::Printf(TEXT("kept clear of the prop (closest %.1f cm, limit 50)"), MinDist), MinDist > 50.f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorSpeedSurvivesPropAvoidance, "Aquarium.Fish.SpeedSurvivesPropAvoidance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorSpeedSurvivesPropAvoidance::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	SpawnProp(World, FVector(400.f, 0.f, 150.f), FVector(1.f, 1.f, 1.f));
+
+	AFishActor* Fish = SpawnFish(World, 5u);
+	Fish->bPlayerControlled = true;
+	Fish->PlaneOrigin = FVector(400.f, -250.f, 150.f);
+	Fish->PlaneHalfWidth = 400.f;
+	Fish->PlaneHalfHeight = 200.f;
+	Fish->InitializeSwim();
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));
+	for (int i = 0; i < 60; ++i) Fish->StepSwim(0.05f);   // reach cruising speed
+
+	// This is the M3 regression guard: an avoidance rule that zeroes the blocked component makes
+	// the speed dip toward zero, and a velocity through zero has no stable heading, which flipped
+	// the facing 180 degrees. The speed must stay up the whole way past the prop.
+	float MinSpeed = 1e9f;
+	float MaxFacingStepDeg = 0.f;
+	bool bPassedProp = false;
+	FQuat Prev = Fish->GetActorQuat();
+	for (int i = 0; i < 340; ++i)
+	{
+		// Stop before the far wall. The plan's version simply ran 340 more steps, which is 17 s
+		// of travel across a 400 cm half-width plane: the fish parks against the boundary and
+		// AvoidBoundary brings it to a standstill BY DESIGN (that is the M3 player rule -- push
+		// into a wall and you stop). Measured min speed was 0.0 cm/s, a failure that said nothing
+		// about prop avoidance. The window ends where the boundary band begins.
+		if (Fish->GetActorLocation().Y - Fish->PlaneOrigin.Y > Fish->PlaneHalfWidth - 60.f)
+		{
+			break;
+		}
+		Fish->StepSwim(0.05f);
+		if (Fish->GetActorLocation().Y > 30.f)
+		{
+			bPassedProp = true;   // the prop sits at Y = 0 with a 50 cm radius
+		}
+		MinSpeed = FMath::Min(MinSpeed, Fish->CurrentSpeed());
+		const FQuat Now = Fish->GetActorQuat();
+		MaxFacingStepDeg = FMath::Max(MaxFacingStepDeg, FMath::RadiansToDegrees(
+			FMath::Acos(FMath::Clamp(static_cast<float>(FVector::DotProduct(Prev.GetAxisX(), Now.GetAxisX())), -1.f, 1.f))));
+		Prev = Now;
+	}
+	AddInfo(FString::Printf(TEXT("min speed %.1f cm/s (max %.1f), largest nose swing %.1f deg"), MinSpeed, Fish->MaxSpeed, MaxFacingStepDeg));
+	TestTrue(TEXT("the window actually covered the prop passage"), bPassedProp);
+	TestTrue(FString::Printf(TEXT("speed never collapsed (min %.1f, floor %.1f)"), MinSpeed, Fish->MaxSpeed * 0.8f), MinSpeed > Fish->MaxSpeed * 0.8f);
+	return TestTrue(FString::Printf(TEXT("no facing snap (largest swing %.1f deg)"), MaxFacingStepDeg), MaxFacingStepDeg < 45.f);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishSchoolDevTogglesParse, "Aquarium.Fish.DevTogglesParse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishSchoolDevTogglesParse::RunTest(const FString&)
+{
+	// Pure parser, so no world and no command line are needed. These two flags exist for the
+	// per-item performance attribution run: M4b showed that predicting which item is expensive
+	// does not work, and toggling one at a time does.
+	TestTrue(TEXT("recognises -AquariumNoSchooling"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoSchooling -other"), TEXT("AquariumNoSchooling")));
+	TestTrue(TEXT("recognises -AquariumNoPropAvoid"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoPropAvoid"), TEXT("AquariumNoPropAvoid")));
+	TestFalse(TEXT("absent flag is false"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumAutoInput=RRLL"), TEXT("AquariumNoSchooling")));
+	TestFalse(TEXT("the two flags are independent"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoSchooling"), TEXT("AquariumNoPropAvoid")));
+	TestFalse(TEXT("a null command line is false, not a crash"),
+		UFishSchoolSubsystem::ParseDisableFlag(nullptr, TEXT("AquariumNoSchooling")));
+	return TestFalse(TEXT("a null flag is false, not a crash"),
+		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoSchooling"), nullptr));
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

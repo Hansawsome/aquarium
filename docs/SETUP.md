@@ -1,6 +1,6 @@
 # macOS 개발 도구와 MCP 연결
 
-상태 기준: 2026-09-21. 규칙 계층·Unreal 프로젝트·M1/M2/M2b/M3/M4a/M4b 장면과 에셋은 이 문서 끝의 재현 명령으로 만든다.
+상태 기준: 2026-09-21. 규칙 계층·Unreal 프로젝트·M1/M2/M2b/M3/M4a/M4b/M4c 장면과 에셋은 이 문서 끝의 재현 명령으로 만든다.
 
 ## 완료
 
@@ -98,12 +98,13 @@ Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`).
 
 참고: `DefaultEngine.ini`의 시작 맵 `/Engine/Maps/Templates/OpenWorld`는 에디터가 `Untitled_1`로 열었다. M1에서 프로젝트 자체 맵을 만들면 교체한다.
 
-## M1~M4b 재현 명령 (2026-09-21)
+## M1~M4c 재현 명령 (2026-09-21)
 
 모든 에셋은 스크립트 산출물이다. 저장소 루트에서:
 
 ```bash
-# 1. 규칙 계층 테스트 (66개)
+# 1. 규칙 계층 테스트 (90개) — 기대 출력은 `100% tests passed out of 90`
+#    (이 ctest는 "0 tests failed out of N" 형식을 쓰지 않는다. 그 문자열을 grep하면 항상 0건이라 조용히 통과한다)
 cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
 
 # 2. 에셋 제작 (Blender 5.2, 각 약 1분; 공통 모듈 assets/blender/fishlib.py)
@@ -125,7 +126,7 @@ done
 # 4b. 한국어 폰트 (FontFace 에셋; 폰트 임포트는 commandlet에서 크래시하므로 ExecCmds 방식)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput -ExecCmds="py $PWD/unreal/Aquarium/Scripts/import_fonts.py, quit" 2>&1 | grep FONT_OK
 
-# 5. Unreal Automation 테스트 (38개)
+# 5. Unreal Automation 테스트 (47개)
 "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -ExecCmds="Automation RunTests Aquarium; Quit" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep "Test Completed"
 
 # 6. 영상: M1 34초 유영(-dumpmovie, UI 없음) / M2 13.5초 입장→세션→나가기 흐름(UI 포함 프레임 캡처, 개발 전용 옵션)
@@ -140,6 +141,16 @@ scripts/render_m4a_compare.sh   # CLOSEUP_OK / VIDEO_OK / SCENE_OK / COMPARE_OK 
 
 # 8. M4b 검토 산출물: 산호 5종 근접 스틸 + 산호초 영상 + 장면 스틸 + M4a 대비 나란히 비교
 scripts/render_m4b_compare.sh   # CLOSEUP_OK / VIDEO_OK / SCENE_OK / COMPARE_OK + MATERIAL_COMPILE_FAILURES=0 확인
+
+# 9. M4c 검토 산출물: 산호초 영상(45초) + 수직 전환 전용 영상(60 fps 12초) + 장면 스틸 + M4b 대비 비교
+scripts/render_m4c_compare.sh   # VIDEO_OK / VERTICAL_OK / SCENE_OK / COMPARE_OK +
+                                # MATERIAL_COMPILE_FAILURES=0 AUTOINPUT_UNKNOWN=0 AUTOINPUT_BAD_DURATION=0 확인
+
+# 10. M4c 항목별 성능 분해 (기본 → 무리 끔 → 소품 회피 끔 → 둘 다 끔)
+scripts/measure_m2b_perf.sh
+EXTRA_ARGS="-AquariumNoSchooling" scripts/measure_m2b_perf.sh
+EXTRA_ARGS="-AquariumNoPropAvoid" scripts/measure_m2b_perf.sh
+EXTRA_ARGS="-AquariumNoSchooling -AquariumNoPropAvoid" scripts/measure_m2b_perf.sh
 ```
 
 **2단계 비고 (M4a 이후 물고기 임포트는 종당 세 장).** 물고기 스크립트는 종마다 2048² 세 장
@@ -201,6 +212,46 @@ AQ_PROP_COUNT=14        # 프롭 22 → 14
 (같은 실행 시간·같은 워밍업), 레벨을 다시 빌드한 뒤 측정한다. **실행 간 노이즈 바닥이 약 1.3 fps**이므로
 그보다 작은 차이는 항목의 비용으로 읽지 않는다. 결과는
 [`docs/reviews/2026-09-21-m4b-perf.md`](reviews/2026-09-21-m4b-perf.md).
+
+**9단계 비고(M4c).** M4c의 세 항목(무리 행동·소품 회피·수직 롤 제거)은 **전부 시간축 현상이라
+스틸에 나타나지 않는다.** 그래서 이 스크립트에서 판정 대상은 클립 두 개이고, 장면 스틸과 비교 이미지는
+M4b의 조명·안개·산호가 회귀하지 않았는지 확인하는 용도뿐이다. M4b 하네스에 있던 산호 근접 스틸 단계는
+삭제했다 — M4c는 산호 메시도 틴트도 건드리지 않으므로 M4b 스틸을 다시 찍는 것에 불과하다.
+산호초 클립은 20초로는 무리가 형성되기 전에 끝나 **45초**로 늘렸고, 수직 전환 클립은 12초 동안 헤딩이
+수직 특이점을 여덟 번 지나도록 짠 별도 스크립트를 **60 fps**로 찍는다. `BEFORE` 기본값은 M4b 장면
+스틸이며, 스크립트는 `BEFORE`가 `m4c` 산출물을 가리키면 그 자리에서 실패한다(M4b에서 실제로
+M4b를 M4b와 비교한 사고가 있었다).
+
+**`-AquariumAutoInput` 토큰 문법 — 반드시 이 형식이어야 한다.** 값은 쉼표로 나뉜 토큰 목록이고,
+각 토큰은 **`<방향문자><초>`** 하나다.
+
+- 방향문자: `R`(오른쪽) `L`(왼쪽) `U`(위) `D`(아래) `0`(아무 키도 안 누름). 대소문자는 무시한다.
+- 초: 방향문자 **바로 뒤**에 오는 양수. `R3`, `U1.5`, `0 2`(공백은 허용, 트림된다).
+- **콜론 구분자는 없다. 대각선 토큰도 없다.** `U:1.5`는 방향 `U`에 나머지 `":1.5"`라 `Atof`가 0이고,
+  `UR1.5`는 방향 `U`에 나머지 `"R1.5"`라 역시 `Atof`가 0이다. 둘 다 **버려진다.**
+- **파서는 알아볼 수 없는 토큰에 대해 경고만 찍고 조용히 무시한다**
+  (`AquariumAutoInput: unknown direction in '…'` / `AquariumAutoInput: bad duration in '…'`).
+  즉 오타 하나가 자동 입력 대본을 조용히 줄이거나 통째로 비운다. **그래도 캡처는 정상적으로 돌고
+  그럴듯한 클립이 나온다** — M4c에서 계획서의 `U:1.5,UR:1.5,…`가 실제로 "입력이 하나도 없는"
+  수직 전환 클립을 만들 뻔했다. 이 때문에 `render_m4c_compare.sh`는 실행 후 두 경고 문자열의 건수가
+  모두 0인지 단언한다(`AUTOINPUT_UNKNOWN=0 AUTOINPUT_BAD_DURATION=0`). 새 대본을 쓸 때는
+  기억이 아니라 `ADiverPlayerController::BuildAutoInputSteps`를 보고 쓴다.
+
+**10단계 비고 — `EXTRA_ARGS`(M4c에서 추가).** `scripts/measure_m2b_perf.sh`에는 원래 엔진 명령줄에
+인자를 덧붙일 수단이 없었다. M4c에서 `EXTRA_ARGS`를 추가해 같은 실행 시간·같은 워밍업·같은 스크립트로
+항목별 토글을 측정할 수 있게 했다. 개발 전용 토글은 두 개다.
+
+```bash
+-AquariumNoSchooling   # 무리 행동(보이즈)을 끈다. BuildSortedNeighbors와 SchoolingSteer를 건너뛰고,
+                       # 이웃 스냅샷은 UFishSchoolSubsystem::Neighbors() 안에서 지연 생성이므로 함께 생략된다
+-AquariumNoPropAvoid   # 소품 회피 조향을 끈다
+```
+
+아무것도 주지 않은 상태가 출하 설정이며, 커밋된 레벨과 보고 수치는 언제나 그 상태다.
+이 스크립트는 산출물 이름을 항상 `<날짜>-m2b-*`로 쓰므로 실행 후 CSV를 `<날짜>-m4c-frametimes.csv`로
+옮긴다. **실행 간 노이즈 바닥은 약 1.3 fps**이고, M4c 측정에서는 세 토글 차이가 전부 그 아래인 데다
+부호까지 반대여서 **점추정이 아니라 상한으로만** 읽었다. 결과는
+[`docs/reviews/2026-09-21-m4c-perf.md`](reviews/2026-09-21-m4c-perf.md).
 
 **머티리얼 컴파일 검사의 한계.** Automation 테스트 `Aquarium.Content.PropMaterialsCompile`은
 `-nullrhi`에 `FMaterialResource`가 없어 **셰이더 컴파일 오류를 검사하지 못한다**(로그에

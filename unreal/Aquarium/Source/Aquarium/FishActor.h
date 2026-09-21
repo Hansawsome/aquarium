@@ -4,9 +4,12 @@
 #include "GameFramework/Actor.h"
 #include "Components/PoseableMeshComponent.h"
 
+#include "aquarium/Boids.h"
 #include "aquarium/Bounds.h"
+#include "aquarium/Facing.h"
 #include "aquarium/Heading.h"
 #include "aquarium/Motion.h"
+#include "aquarium/Obstacles.h"
 #include "aquarium/SwimAnimation.h"
 #include "aquarium/SwimPlane.h"
 #include "aquarium/Wander.h"
@@ -42,6 +45,21 @@ public:
 	// (deg/s^2) of the turn rate fed to the body bend. Note: FMath::QInterpConstantTo caps a single
 	// step at 1 rad regardless of DeltaSeconds, so on hitch frames the effective cap is ~57 deg.
 	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "1")) float MaxFacingTurnRate = 540.f;
+	// Twist (roll about the nose-tail axis) is rate-limited SEPARATELY from the swing that aims
+	// the nose. A plane-bound fish that keeps its dorsal fin up has a facing frame that is
+	// discontinuous at the two vertical headings -- crossing straight up costs a 180 degree twist,
+	// which at MaxFacingTurnRate took 0.35 s and read as the pirouette recorded since M2. The
+	// twist cannot be removed (it is topology), so it is spent fast while the fish is steep and
+	// therefore end-on to the fixed camera, where it cannot be read as a roll.
+	// See aquarium::FacingParams and docs/superpowers/specs/2026-09-21-m4c-schooling-design.md.
+	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "1")) float SteepRollRate = 2880.f;
+	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "0", ClampMax = "0.999")) float SteepBeginSin = 0.70f;
+	// How much of a background fish's desired direction comes from its school rather than its own
+	// wander target. Not 1.0 on purpose: at 1.0 a whole species congeals into one block, and the
+	// remaining wander is what keeps the group loose. Tune this from the clip, not from a still.
+	UPROPERTY(EditAnywhere, Category = "Swim", meta = (ClampMin = "0", ClampMax = "1")) float SchoolWeight = 0.55f;
+	// How far along world X a prop may be and still count as intersecting this fish's plane.
+	UPROPERTY(EditAnywhere, Category = "Swim") float ObstaclePlaneHalfDepth = 40.f;
 	UPROPERTY(EditAnywhere, Category = "Swim") TObjectPtr<USkeletalMesh> FishMesh = nullptr;
 	// True for the fish spawned by the game mode for the active player session (F-14).
 	UPROPERTY(VisibleAnywhere, Category = "Swim") bool bIsPlayerFish = false;
@@ -53,6 +71,11 @@ public:
 	// Advances wander -> boundary avoidance -> motion, then applies transform and body wave.
 	void StepSwim(float DeltaSeconds);
 	float CurrentSpeed() const { return Motion.velocity.Length(); }
+
+	// This fish as the rules layer sees it, in the shared swim frame (x = world Y, y = world Z).
+	aquarium::BoidNeighbor AsNeighbor() const;
+	// Equality key derived from the mesh asset. Never logged, never stored.
+	int32 SpeciesKey() const { return SpeciesKeyValue; }
 
 	// Sets the desired swim direction in swim-plane coordinates (X = screen right, Y = screen up).
 	// Stored normalized, so a longer input vector can never exceed the normal swim speed. Only read
@@ -74,6 +97,7 @@ public:
 	UNameTagComponent* AttachNameTag(const FText& Name);
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
@@ -88,6 +112,21 @@ private:
 	aquarium::MotionState Motion;
 	aquarium::MotionParams MotionParamsValue;
 	aquarium::SwimAnimParams AnimParams;
+	aquarium::FacingParams FacingParamsValue;
+	aquarium::BoidsParams BoidsParamsValue;
+	int32 SpeciesKeyValue = 0;
+	int32 ComputeSpeciesKey() const;
+	void BuildSortedNeighbors(const std::vector<aquarium::BoidNeighbor>& Snapshot, const aquarium::Vec2& Shared);
+	// Per-fish, distance-sorted view of the shared snapshot. aquarium::BoidsParams::maxNeighbors
+	// truncates by ARRAY ORDER, not by distance, so handing the raw registration-order snapshot
+	// straight in would pick an arbitrary six fish. Kept as a member so the per-tick cost is a
+	// sort of a handful of already-gated neighbours and no allocation.
+	std::vector<aquarium::BoidNeighbor> NeighborScratch;
+	// Built ONCE in InitializeSwim. Every fish's plane X is fixed for its whole life, so the
+	// "which props reach my plane" question has a constant answer; only a handful of discs
+	// survive, which is why per-tick obstacle cost is a few circle tests and never 22.
+	std::vector<aquarium::Obstacle> PlaneObstacles;
+	aquarium::ObstacleParams ObstacleParamsValue;
 	TOptional<aquarium::WanderBehavior> Wander; // WanderBehavior has no default ctor
 	float SwimPhase = 0.f;   // accumulated wave phase (rad), advanced per tick
 	float LastHeadingDeg = 0.f;

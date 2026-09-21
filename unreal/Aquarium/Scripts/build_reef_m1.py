@@ -918,9 +918,17 @@ for i, (mesh_path, scale_range) in enumerate(mesh_order):
     assert isinstance(mi, unreal.MaterialInstanceConstant), "prop tint missing: %s" % mi_path
     pc.set_material(0, mi)
     prop.set_actor_scale3d(unreal.Vector(scale, scale, scale * z_stretch))
+    # Runtime obstacle avoidance finds props by this tag and derives their radius from the actor's
+    # own bounds. Actor tags survive cooking (actor LABELS are editor-only), and deriving the
+    # radius at runtime is deliberate: PROP_HALF_EXTENTS above is a THIRD place the same number
+    # could live, and M4b proved that a rule duplicated in two places is a rule the verifier can
+    # never check.
+    prop.tags = [unreal.Name("AquariumProp")]
     prop_count += 1
 
+tagged = len([a for a in eas.get_all_level_actors()
+              if a.actor_has_tag(unreal.Name("AquariumProp"))])
 assert les.save_current_level(), "save_current_level failed"
-print("REEF_OK actors=%d fish=%d props=%d dof=%s map=%s"
-      % (len(eas.get_all_level_actors()), fish_count, prop_count,
+print("REEF_OK actors=%d fish=%d props=%d tagged=%d dof=%s map=%s"
+      % (len(eas.get_all_level_actors()), fish_count, prop_count, tagged,
          "off" if DOF is None else "on", MAP))
