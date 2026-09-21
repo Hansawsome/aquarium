@@ -845,4 +845,84 @@ bool FFishActorBackgroundResumesWander::RunTest(const FString&)
 	return true;
 }
 
+// F-12: while fleeing, the flee beats the arrow keys; from recovery the CURRENT key applies.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorFleeBeatsArrowKeys, "Aquarium.Fish.FleeBeatsArrowKeys",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorFleeBeatsArrowKeys::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = World->SpawnActor<AFishActor>();
+	Fish->PlaneOrigin = FVector(220.f, 0.f, 105.f);
+	Fish->bIsPlayerFish = true;
+	Fish->bPlayerControlled = true;
+	Fish->InitializeSwim();
+	// A control fish holding exactly the same key and never clicked. PLAN DEVIATION, see the
+	// report: the plan asserted the clicked fish ends up RIGHT of where it was when clicked, which
+	// no amount of correct wiring can produce. The flee is head-on to a held key here, and
+	// aquarium::StepMotion turns the velocity at accel = 30 cm/s^2, so reversing a 40 cm/s leftward
+	// velocity needs 1.33 s while the whole flee lasts 0.8 s. "The flee beats the key" is therefore
+	// measured the only way physics allows: against a fish holding the SAME key with no click.
+	AFishActor* Control = World->SpawnActor<AFishActor>();
+	Control->PlaneOrigin = FVector(220.f, 0.f, 105.f);
+	Control->bIsPlayerFish = true;
+	Control->bPlayerControlled = true;
+	Control->InitializeSwim();
+	// The child is holding LEFT (screen -Y) the whole time.
+	for (int32 i = 0; i < 30; ++i)
+	{
+		Fish->SetInputDirection(FVector2D(-1.f, 0.f));
+		Control->SetInputDirection(FVector2D(-1.f, 0.f));
+		Fish->StepSwim(1.f / 60.f);
+		Control->StepSwim(1.f / 60.f);
+	}
+	TestEqual(TEXT("the two fish are in lockstep before the click"),
+		Fish->GetActorLocation().Y, Control->GetActorLocation().Y, 1e-3);
+
+	// The child clicks their OWN fish, on its left side, so the flee wants to go RIGHT.
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() - FVector(0.f, 15.f, 0.f));
+	for (int32 i = 0; i < 48; ++i)
+	{
+		Fish->SetInputDirection(FVector2D(-1.f, 0.f));   // still held, as the controller would
+		Control->SetInputDirection(FVector2D(-1.f, 0.f));
+		Fish->StepSwim(1.f / 60.f);
+		Control->StepSwim(1.f / 60.f);
+	}
+	TestTrue(FString::Printf(TEXT("flee wins over the held key (%.2f right of the unclicked control %.2f)"),
+		Fish->GetActorLocation().Y, Control->GetActorLocation().Y),
+		Fish->GetActorLocation().Y > Control->GetActorLocation().Y + 1.f);
+
+	// Run to the end of the flee, then keep holding LEFT through recovery.
+	for (int32 i = 0; i < 20; ++i) { Fish->SetInputDirection(FVector2D(-1.f, 0.f)); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("recovering"), Fish->FleeState() == aquarium::BehaviorState::Recovering);
+	const double YAtRecovery = Fish->GetActorLocation().Y;
+	for (int32 i = 0; i < 60; ++i) { Fish->SetInputDirection(FVector2D(-1.f, 0.f)); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("the held key steers again from recovery"), Fish->GetActorLocation().Y < YAtRecovery);
+	return true;
+}
+
+// F-12: a key RELEASED during the flee must not come back to life at recovery.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorRecoveryUsesCurrentInput, "Aquarium.Fish.RecoveryUsesCurrentInput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorRecoveryUsesCurrentInput::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = World->SpawnActor<AFishActor>();
+	Fish->PlaneOrigin = FVector(220.f, 0.f, 105.f);
+	Fish->bIsPlayerFish = true;
+	Fish->bPlayerControlled = true;
+	Fish->InitializeSwim();
+	Fish->SetInputDirection(FVector2D(0.f, 1.f));                    // holding UP
+	for (int32 i = 0; i < 30; ++i) { Fish->StepSwim(1.f / 60.f); }
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() + FVector(0.f, 0.f, 15.f));  // flee downward
+	// The child lets go during the flee.
+	for (int32 i = 0; i < 60; ++i) { Fish->SetInputDirection(FVector2D::ZeroVector); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("recovering"), Fish->FleeState() == aquarium::BehaviorState::Recovering);
+	const float SpeedAtRecovery = Fish->CurrentSpeed();
+	for (int32 i = 0; i < 72; ++i) { Fish->SetInputDirection(FVector2D::ZeroVector); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(FString::Printf(TEXT("coasts to a stop, no resurrected key (%.2f < %.2f)"),
+		Fish->CurrentSpeed(), SpeedAtRecovery),
+		Fish->CurrentSpeed() < SpeedAtRecovery * 0.5f);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
