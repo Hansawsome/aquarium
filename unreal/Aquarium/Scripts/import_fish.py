@@ -1,5 +1,6 @@
-# Imports a fish species' FBX + base color texture into /Game/Fish/<name> and
-# builds M_<name>. Idempotent: re-running replaces the existing assets.
+# Imports a fish species' FBX + base colour / normal / roughness textures into
+# /Game/Fish/<name> and builds the PBR material M_<name> (Subsurface shading).
+# Idempotent: re-running replaces the existing assets.
 #
 # Run headless (defaults to BlueTang + Clownfish + YellowTang + Butterflyfish + Damselfish):
 #   UnrealEditor-Cmd Aquarium.uproject -run=pythonscript -script=Scripts/import_fish.py
@@ -59,22 +60,45 @@ def bone_names(mesh):
     return out
 
 
+def import_texture(dest, name, kind):
+    """Import T_<name>_<kind>.png. Normal/Roughness are linear data, not colour."""
+    png = os.path.join(ROOT, "assets", "blender", "export",
+                       "T_%s_%s.png" % (name, kind))
+    assert os.path.isfile(png), "missing PNG: %s" % png
+    tex_name = "T_%s_%s" % (name, kind)
+    paths = import_asset(dest, png, destination_name=tex_name)
+    assert paths, "texture import failed: %s" % png
+    tex = unreal.load_asset(paths[0])
+    assert isinstance(tex, unreal.Texture2D), "not a Texture2D: %s" % paths
+    if kind == "BaseColor":
+        tex.set_editor_property("srgb", True)
+    elif kind == "Normal":
+        tex.set_editor_property("srgb", False)
+        tex.set_editor_property("compression_settings",
+                                unreal.TextureCompressionSettings.TC_NORMALMAP)
+    else:  # Roughness and any other linear mask
+        tex.set_editor_property("srgb", False)
+        # TC_MASKS is required, not just srgb=False: a mask left on TC_Default
+        # is a colour texture as far as the material compiler is concerned, and
+        # a Linear Grayscale/Masks sampler on it fails the whole material
+        # ("Sampler type is Linear Grayscale, should be Linear Color"), which
+        # silently swaps the fish for the Default Material at runtime.
+        tex.set_editor_property("compression_settings",
+                                unreal.TextureCompressionSettings.TC_MASKS)
+    eal.save_loaded_asset(tex)
+    return tex
+
+
 def import_species(name):
     fbx = os.path.join(ROOT, "assets", "blender", "export", "%s.fbx" % name)
-    png = os.path.join(ROOT, "assets", "blender", "export", "T_%s_BaseColor.png" % name)
     dest = "/Game/Fish/%s" % name
 
     assert os.path.isfile(fbx), "missing FBX: %s" % fbx
-    assert os.path.isfile(png), "missing PNG: %s" % png
 
-    # --- texture -------------------------------------------------------------
-    tex_name = "T_%s_BaseColor" % name
-    tex_paths = import_asset(dest, png, destination_name=tex_name)
-    assert tex_paths, "texture import failed"
-    tex = unreal.load_asset(tex_paths[0])
-    assert isinstance(tex, unreal.Texture2D), "not a Texture2D: %s" % tex_paths
-    tex.set_editor_property("srgb", True)
-    eal.save_loaded_asset(tex)
+    # --- textures ------------------------------------------------------------
+    maps = ["BaseColor", "Normal", "Roughness"]
+    tex_by_kind = dict((k, import_texture(dest, name, k)) for k in maps)
+    tex = tex_by_kind["BaseColor"]
 
     # --- skeletal mesh ---------------------------------------------------------
     opt = unreal.FbxImportUI()
@@ -113,12 +137,41 @@ def import_species(name):
     else:
         mat = asset_tools.create_asset(mat_name, dest, unreal.Material, unreal.MaterialFactoryNew())
     mel = unreal.MaterialEditingLibrary
-    node = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -400, 0)
-    node.set_editor_property("texture", tex)
-    mel.connect_material_property(node, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
-    rough = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -400, 300)
-    rough.set_editor_property("r", 0.35)
-    mel.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+
+    # Subsurface shading gives the thin fins and body their translucent look;
+    # the subsurface colour is the base colour dimmed, opacity is the
+    # scattering weight (low = mostly opaque flesh with a soft bleed).
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_SUBSURFACE)
+
+    base = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, 0)
+    base.set_editor_property("texture", tex)
+    mel.connect_material_property(base, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    nrm = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, 300)
+    nrm.set_editor_property("texture", tex_by_kind["Normal"])
+    nrm.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+    mel.connect_material_property(nrm, "RGB", unreal.MaterialProperty.MP_NORMAL)
+
+    rgh = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, 600)
+    rgh.set_editor_property("texture", tex_by_kind["Roughness"])
+    rgh.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_MASKS)
+    mel.connect_material_property(rgh, "R", unreal.MaterialProperty.MP_ROUGHNESS)
+
+    ss_scale = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -600, 900)
+    ss_scale.set_editor_property("r", 0.6)
+    ss_mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -300, 900)
+    mel.connect_material_expressions(base, "RGB", ss_mul, "A")
+    mel.connect_material_expressions(ss_scale, "", ss_mul, "B")
+    mel.connect_material_property(ss_mul, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
+
+    opac = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -600, 1100)
+    opac.set_editor_property("r", 0.15)
+    mel.connect_material_property(opac, "", unreal.MaterialProperty.MP_OPACITY)
+
+    spec = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -600, 1300)
+    spec.set_editor_property("r", 0.4)
+    mel.connect_material_property(spec, "", unreal.MaterialProperty.MP_SPECULAR)
+
     # Required so the material is actually used on the skeletal mesh in -game
     # (otherwise the engine falls back to the default material at runtime).
     mat.set_editor_property("used_with_skeletal_mesh", True)
@@ -155,8 +208,8 @@ def import_species(name):
               m.get_editor_property("material_interface").get_path_name()
               if m.get_editor_property("material_interface") else None)
              for m in sk.get_editor_property("materials")]
-    print("IMPORT_OK species=%s mesh=%s bones=%s extent=(%.2f,%.2f,%.2f) slots=%s skeleton=%s physics=%s" % (
-        name, sk.get_path_name(), bones, ext.x, ext.y, ext.z, slots,
+    print("IMPORT_OK species=%s maps=[%s] mesh=%s bones=%s extent=(%.2f,%.2f,%.2f) slots=%s skeleton=%s physics=%s" % (
+        name, ",".join(maps), sk.get_path_name(), bones, ext.x, ext.y, ext.z, slots,
         sk.skeleton.get_path_name() if sk.skeleton else None,
         sk.physics_asset.get_path_name() if sk.physics_asset else None))
 

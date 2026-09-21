@@ -1,6 +1,6 @@
 # macOS 개발 도구와 MCP 연결
 
-상태 기준: 2026-09-21. 규칙 계층·Unreal 프로젝트·M1/M2/M2b/M3 장면과 에셋은 이 문서 끝의 재현 명령으로 만든다.
+상태 기준: 2026-09-21. 규칙 계층·Unreal 프로젝트·M1/M2/M2b/M3/M4a 장면과 에셋은 이 문서 끝의 재현 명령으로 만든다.
 
 ## 완료
 
@@ -98,7 +98,7 @@ Claude Code 등록: `.mcp.json`의 `unreal` (HTTP, `http://127.0.0.1:8000/mcp`).
 
 참고: `DefaultEngine.ini`의 시작 맵 `/Engine/Maps/Templates/OpenWorld`는 에디터가 `Untitled_1`로 열었다. M1에서 프로젝트 자체 맵을 만들면 교체한다.
 
-## M1~M3 재현 명령 (2026-09-21)
+## M1~M4a 재현 명령 (2026-09-21)
 
 모든 에셋은 스크립트 산출물이다. 저장소 루트에서:
 
@@ -134,7 +134,34 @@ scripts/render_m2_video.sh    # M2 흐름 -AquariumAutoNickname=니모(테스트
 scripts/render_m2b_video.sh   # M2b 산호초 22초 관람
 scripts/render_m3_video.sh    # M3 방향키 조종 20초 (개발 전용 -AquariumAutoNickname=니모(테스트 데이터만) -AquariumAutoInput="R3,U2,L3,D2,0 2,R2,U2,0 2" -AquariumAssignmentSeed=1 -AquariumCaptureUI=<dir>; 빌드 2회 포함 약 3분, SKIP_BUILD=1로 생략)
 scripts/measure_m2b_perf.sh   # 프레임 시간 CSV → docs/reviews/<날짜>-m2b-perf.md (-benchmark 미사용)
+
+# 7. M4a 검토 산출물: 근접 스틸 + 산호초 영상 + 장면 스틸 + 개선 전/후 나란히 비교
+scripts/render_m4a_compare.sh   # CLOSEUP_OK / VIDEO_OK / SCENE_OK / COMPARE_OK 확인
 ```
+
+**2단계 비고 (M4a 이후 물고기 임포트는 종당 세 장).** 물고기 스크립트는 종마다 2048² 세 장
+(`T_<종>_{BaseColor,Normal,Roughness}.png`)을 베이크하므로 한 종에 약 1분이 더 걸린다.
+각 스크립트는 `verts=… bones=10 unweighted=0 rootMaxW=0.000` 줄을 출력하고, 본 목록
+(`Root, Spine0..5, Tail, PecL, PecR`)이 깨지면 그 자리에서 실패한다. 4단계의 `import_fish.py`는
+이 세 장을 모두 임포트해 `M_<종>`을 Subsurface 셰이딩 모델로 다시 구성하며
+`IMPORT_OK species=… maps=[BaseColor,Normal,Roughness]` 다섯 줄을 출력한다.
+러프니스 계열 텍스처는 반드시 `TC_MASKS`로 임포트하고 머티리얼에서 `SAMPLERTYPE_MASKS`로 샘플링한다.
+sRGB만 끄고 `TC_Default`로 두면 "Sampler type is Linear Grayscale, should be Linear Color"로
+머티리얼 컴파일이 조용히 실패하고 해당 오브젝트가 회색 기본 머티리얼로 그려진다
+(M4a에서 물고기 5종과 바위 3종에서 각각 한 번씩 발생했다. `import_props.py`도 같은 규약).
+
+**7단계 비고.** `scripts/render_m4a_compare.sh`는 임시 레벨 `/Game/Maps/_CloseupTmp`에 물고기
+한 마리와 `DiverCamera` 태그가 붙은 카메라를 1 m 앞에 놓고 근접 스틸을 찍은 뒤 레벨을 지운다
+(`CLOSEUP_SPECIES`·`CLOSEUP_FOV`로 종과 화각을 바꾼다. 기본 BlueTang / 30도 — 산호초의 75도로는
+25 cm 물고기가 화면의 1/6이라 눈·비늘 판단에 쓸 수 없다). 산호초 영상과 장면 스틸은
+`render_m3_video.sh`와 완전히 같은 맵·시드·자동 입력(`-AquariumAutoNickname=니모`(테스트 데이터만),
+`-AquariumAutoInput`, `-AquariumAssignmentSeed=1`)으로 찍고, `BEFORE`(기본
+`docs/reviews/2026-09-21-m3-wall.png`)와 `hstack`으로 붙여 `-compare.png`를 만든다.
+`SKIP_BUILD=1`, `SKIP_CLOSEUP=1`, `SKIP_SCENE=1`로 단계를 건너뛴다.
+
+**성능 재측정 비고.** `measure_m2b_perf.sh`는 산출물 이름을 항상 `<날짜>-m2b-*`로 쓴다.
+M4a 재측정본은 실행 후 CSV를 `<날짜>-m4a-frametimes.csv`로 옮기고, 보고서는 M2b 기준선 비교를
+더해 `docs/reviews/<날짜>-m4a-perf.md`에 직접 작성했다.
 
 주의: GUI 에디터를 강제 종료한 뒤 다음 실행이 "패키지 복구" 프롬프트에 걸리면 `unreal/Aquarium/Saved/Autosaves`를 지운다. MCP `CaptureViewport`로 뷰포트 이미지를 얻는 절차는 위 "Unreal 공식 MCP" 절 참고.
 
