@@ -92,23 +92,33 @@ SAND_TILING = 25.0                      # tiles across the floor -> one tile per
 SUN_ROT = (-65.0, 30.0)                 # pitch, yaw
 SUN_INTENSITY = 14.0                   # light function peaks at 1.0, so the sun carries brightness
 SUN_COLOR = dict(r=0.55, g=0.85, b=1.0)
-SUN_VOLUMETRIC_SCATTERING = 8.0         # drives the light shafts
+SUN_VOLUMETRIC_SCATTERING = 14.0        # shafts need scattering AND an occluder (SurfaceGobo)
 
 SKY_INTENSITY = 0.8
 SKY_COLOR = dict(r=0.35, g=0.65, b=0.9)
 SKY_VOLUMETRIC_SCATTERING = 0.5
 
-# Measured in-editor: density 1.5 barely tints the floor at 20 m; 5.0 gives
-# ~40% haze on the fish at 3.3 m and a fully fogged background by ~15 m.
-# Falloff 0 = uniform density (we are inside the water).
-FOG_DENSITY = 5.0
+# M4b: the M4a capture lost every colour by ~10 m, which is why the 36-fish school read as
+# flat silhouettes. Density 2.2 with extinction 0.7 keeps species colour to about 20 m while
+# still fogging the 40 m floor edge away. start_distance clears the nearest 1.5 m so the
+# player's own fish stays crisp. Falloff 0 = uniform density (we are inside the water).
+FOG_DENSITY = 2.2
 FOG_HEIGHT_FALLOFF = 0.0
-FOG_INSCATTER = dict(r=0.02, g=0.18, b=0.30)            # far background colour
-FOG_DIRECTIONAL_INSCATTER = dict(r=0.10, g=0.35, b=0.45)
+FOG_START_DISTANCE = 150.0
+FOG_INSCATTER = dict(r=0.015, g=0.105, b=0.175)         # darker: far = deep water, not bright sky
+FOG_DIRECTIONAL_INSCATTER = dict(r=0.12, g=0.38, b=0.48)
+FOG_DIRECTIONAL_EXPONENT = 6.0                          # wider sun glow
 FOG_ALBEDO = dict(r=30, g=140, b=200, a=255)            # volumetric scattering tint (8-bit)
 FOG_SCATTERING_DISTRIBUTION = 0.6
-FOG_EXTINCTION_SCALE = 1.0
+FOG_EXTINCTION_SCALE = 0.7
 FOG_VOLUMETRIC_DISTANCE = 6000.0
+
+# Surface gobo: an invisible shadow caster at the waterline. Volumetric god rays are
+# scattering intensity TIMES shadow contrast, and this scene had nothing above the camera to
+# cast a shadow at all -- which is why "빛줄기 약함" survived every intensity increase in M1.
+GOBO_Z = 1100.0
+GOBO_SCALE = 60.0                       # 100 cm plane -> 60 m, wider than the 40 m floor
+GOBO_THRESHOLD = 0.42                   # opacity-mask cutoff; higher = narrower, sharper shafts
 
 # Caustics: (period cm, direction deg, drift turns/s). Directions are chosen so
 # no pair is within 30 deg of parallel or anti-parallel; periods are
@@ -286,6 +296,88 @@ mel.recompile_material(m_caus)
 eal.save_loaded_asset(m_caus)
 
 
+
+def build_surface_gobo(m):
+    """Opacity-mask material for the invisible waterline plane. Reuses the caustics wave sum:
+    where the sum is above GOBO_THRESHOLD the plane is solid and blocks the sun, elsewhere it is
+    cut away and the sun gets through. The holes therefore drift with the same rhythm as the
+    floor caustics, so the shafts and the floor patches move together. Unlit and masked; the
+    plane is never drawn (bCastHiddenShadow), so its colour does not matter."""
+    def node(cls, x, y):
+        return mel.create_material_expression(m, cls, x, y)
+
+    def const(x, y, v):
+        n = node(unreal.MaterialExpressionConstant, x, y)
+        n.set_editor_property("r", v)
+        return n
+
+    def mask(src, x, y, r, g):
+        n = node(unreal.MaterialExpressionComponentMask, x, y)
+        n.set_editor_property("r", r)
+        n.set_editor_property("g", g)
+        n.set_editor_property("b", False)
+        n.set_editor_property("a", False)
+        mel.connect_material_expressions(src, "", n, "")
+        return n
+
+    def mul(a, b, x, y):
+        n = node(unreal.MaterialExpressionMultiply, x, y)
+        mel.connect_material_expressions(a, "", n, "A")
+        mel.connect_material_expressions(b, "", n, "B")
+        return n
+
+    def add(a, b, x, y):
+        n = node(unreal.MaterialExpressionAdd, x, y)
+        mel.connect_material_expressions(a, "", n, "A")
+        mel.connect_material_expressions(b, "", n, "B")
+        return n
+
+    def sine(src, x, y):
+        n = node(unreal.MaterialExpressionSine, x, y)
+        mel.connect_material_expressions(src, "", n, "")
+        return n
+
+    wpos = node(unreal.MaterialExpressionWorldPosition, -2000, 0)
+    px = mask(wpos, -1800, -100, True, False)
+    py = mask(wpos, -1800, 100, False, True)
+    t = node(unreal.MaterialExpressionTime, -1800, 300)
+    waves = []
+    for i, (period, angle, drift) in enumerate(CAUSTIC_WAVES[:3]):
+        y = -450 + i * 220
+        kx = math.cos(math.radians(angle)) / (period * 3.0)   # 3x coarser than the floor pattern
+        ky = math.sin(math.radians(angle)) / (period * 3.0)
+        ax = mul(px, const(-1600, y - 60, kx), -1450, y - 60)
+        ay = mul(py, const(-1600, y, ky), -1450, y)
+        at = mul(t, const(-1600, y + 60, drift * 0.5), -1450, y + 60)
+        waves.append(sine(add(add(ax, ay, -1300, y), at, -1150, y), -700, y))
+    s = waves[0]
+    for i, w in enumerate(waves[1:]):
+        s = add(s, w, -550 + i * 100, -100)
+    n_waves = float(len(waves))
+    norm = add(mul(s, const(-250, 100, 1.0 / (2.0 * n_waves)), -150, -100),
+               const(-150, 100, 0.5), -50, -100)
+    # opacity mask = saturate((norm - threshold) * 8): a hard-ish edge so the shafts have edges
+    off = node(unreal.MaterialExpressionSubtract, 50, -100)
+    mel.connect_material_expressions(norm, "", off, "A")
+    mel.connect_material_expressions(const(50, 100, GOBO_THRESHOLD), "", off, "B")
+    gain = mul(off, const(200, 100, 8.0), 300, -100)
+    sat = node(unreal.MaterialExpressionSaturate, 450, -100)
+    mel.connect_material_expressions(gain, "", sat, "")
+    mel.connect_material_property(sat, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+    mel.connect_material_property(const(450, 200, 0.0), "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+
+
+m_gobo = material("M_SurfaceGobo")
+m_gobo.set_editor_property("material_domain", unreal.MaterialDomain.MD_SURFACE)
+m_gobo.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+m_gobo.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+m_gobo.set_editor_property("two_sided", True)
+build_surface_gobo(m_gobo)
+mel.recompile_material(m_gobo)
+eal.save_loaded_asset(m_gobo)
+
+
 # --- level -------------------------------------------------------------------
 # Reuse the existing map (keeps the asset path stable, no ReefM1_1 duplicates)
 # but clear every actor so stale ones never accumulate across runs. Note this
@@ -345,15 +437,29 @@ fc = fog.component
 fc.set_editor_property("fog_density", FOG_DENSITY)
 fc.set_editor_property("fog_height_falloff", FOG_HEIGHT_FALLOFF)
 fc.set_editor_property("fog_max_opacity", 1.0)
-fc.set_editor_property("start_distance", 0.0)
+fc.set_editor_property("start_distance", FOG_START_DISTANCE)
 fc.set_editor_property("fog_inscattering_luminance", unreal.LinearColor(**FOG_INSCATTER))
 fc.set_editor_property("directional_inscattering_luminance", unreal.LinearColor(**FOG_DIRECTIONAL_INSCATTER))
+fc.set_editor_property("directional_inscattering_exponent", FOG_DIRECTIONAL_EXPONENT)
 fc.set_editor_property("enable_volumetric_fog", True)
 fc.set_editor_property("volumetric_fog_scattering_distribution", FOG_SCATTERING_DISTRIBUTION)
 # NB: unreal.Color positional order is (b, g, r, a); use keywords.
 fc.set_editor_property("volumetric_fog_albedo", unreal.Color(**FOG_ALBEDO))
 fc.set_editor_property("volumetric_fog_extinction_scale", FOG_EXTINCTION_SCALE)
 fc.set_editor_property("volumetric_fog_distance", FOG_VOLUMETRIC_DISTANCE)
+
+# Invisible shadow caster: set_visibility(False) + cast_hidden_shadow is Unreal's supported way
+# to have geometry that is never drawn but still occludes light, so nothing appears in the sky
+# above the diver while the volumetric fog gains the shadow contrast it needs for shafts.
+gobo = spawn(unreal.StaticMeshActor, (400, 0, GOBO_Z), label="SurfaceGobo")
+gc = gobo.static_mesh_component
+gc.set_mobility(unreal.ComponentMobility.STATIC)
+assert gc.set_static_mesh(unreal.load_asset(ENGINE_PLANE)), "gobo mesh missing: %s" % ENGINE_PLANE
+gc.set_material(0, m_gobo)
+gobo.set_actor_scale3d(unreal.Vector(GOBO_SCALE, GOBO_SCALE, 1))
+gc.set_visibility(False)
+gc.set_cast_hidden_shadow(True)
+gc.set_editor_property("cast_shadow", True)
 
 cam = spawn(unreal.CameraActor, CAM_LOC, CAM_ROT, label="DiverCamera")
 cam.tags = [unreal.Name("DiverCamera")]

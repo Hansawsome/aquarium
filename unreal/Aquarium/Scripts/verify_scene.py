@@ -7,6 +7,7 @@ import unreal
 
 MAP = "/Game/Maps/ReefM1"
 SAND_MATERIAL = "/Game/Env/M_Sand"
+GOBO_MATERIAL = "/Game/Env/M_SurfaceGobo"
 
 # Must mirror the tuning block in build_reef_m1.py.
 SCHOOL_COUNT = 36
@@ -94,8 +95,22 @@ floor_mat = smc.get_material(0)
 assert floor_mat is not None, "floor has no material"
 assert floor_mat.get_path_name().startswith(SAND_MATERIAL), "floor material is not M_Sand: %s" % floor_mat.get_path_name()
 
+# Surface gobo: the invisible waterline shadow caster (M4b). It must never be drawn but must
+# still cast a shadow, otherwise the volumetric fog has no contrast and the god rays vanish.
+gobos = [a for a in smas if a.get_actor_label() == "SurfaceGobo"]
+assert len(gobos) == 1, "expected exactly one SurfaceGobo, got %d" % len(gobos)
+gobo = gobos[0]
+ggc = gobo.static_mesh_component
+assert ggc.static_mesh is not None, "gobo has no static mesh"
+assert not ggc.is_visible(), "SurfaceGobo must be invisible"
+assert ggc.get_editor_property("cast_hidden_shadow"), "SurfaceGobo must cast a hidden shadow"
+assert ggc.get_editor_property("cast_shadow"), "SurfaceGobo must cast a shadow"
+gobo_mat = ggc.get_material(0)
+assert gobo_mat is not None and gobo_mat.get_path_name().startswith(GOBO_MATERIAL), \
+    "gobo material is not M_SurfaceGobo: %s" % (gobo_mat and gobo_mat.get_path_name())
+
 # Reef props: every other StaticMeshActor. Known meshes, clear of the camera lane.
-props = [a for a in smas if a is not floor]
+props = [a for a in smas if a is not floor and a is not gobo]
 assert len(props) == PROP_COUNT, "expected %d reef props, got %d" % (PROP_COUNT, len(props))
 prop_mesh_names = set()
 for prop in props:
