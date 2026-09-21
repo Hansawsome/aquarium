@@ -137,7 +137,7 @@ kc = sky.light_component
 kc.set_mobility(unreal.ComponentMobility.MOVABLE)
 kc.set_editor_property("source_type", unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP)
 kc.set_editor_property("cubemap", unreal.load_asset("/Engine/MapTemplates/Sky/DaylightAmbientCubemap"))
-kc.set_intensity(0.8)
+kc.set_intensity(2.2)   # matches build_reef_m1.py SKY_INTENSITY
 kc.set_light_color(unreal.LinearColor(r=0.35, g=0.65, b=0.9))
 kc.recapture_sky()
 

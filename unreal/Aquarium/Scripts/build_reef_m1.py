@@ -89,6 +89,16 @@ PROP_SEPARATION_RELAXED = 0.75 # fallback when a prop cannot be placed
 PROP_PLACE_TRIES = 200
 # The camera's forward lane stays clear of props; it widens with distance so a
 # far prop does not occlude the school either.
+#
+# The lane is cleared by the prop's OUTER EDGE, not by its centre. Until M4b the test was
+# abs(y) >= lane, which only keeps a prop's pivot out of the lane: a boulder at X=150 with
+# radius 137 cm sitting at y = 65 passes that test while its body spans y = -72 .. 202, i.e.
+# straight across the camera axis. That is exactly how the t=12 review frame ended up with the
+# player's fish hidden behind a foreground rock. The player fish is pinned to X=220 and the
+# camera's 75 deg FOV spans only +-169 cm there, so a prop whose edge clears
+# lane(x) + radius can never occlude the player's swimming plane.
+# The widest case is a boulder_01 at x=900: 135 + 137 + 5 = 277 cm, still inside PROP_Y,
+# so this rule never pushes a prop off the reef.
 PROP_CLEAR_RADIUS_Y = 60.0     # lane half-width at PROP_X[0]
 PROP_CLEAR_TAPER = 0.10        # extra half-width per cm of X
 PROP_CLEAR_MARGIN = 5.0        # pushed props clear the boundary by this much
@@ -109,7 +119,15 @@ SUN_VOLUMETRIC_SCATTERING = 14.0        # shafts need scattering AND an occluder
 # ~= 77 cm. Real sunlight through a water surface is diffused exactly this way.
 SUN_SOURCE_ANGLE = 7.0
 
-SKY_INTENSITY = 0.8
+# The sky light is the ONLY fill in this scene: the sun is pitched -65 deg and the two gobo
+# planes shadow most of what it would otherwise reach, so anything the sun misses falls to the
+# ambient term. At 0.8 the M4b capture turned the left and right foreground rocks into
+# near-black silhouettes across about a third of the frame -- and the player's own fish, pinned
+# at X=220, sits inside that zone. A child who cannot see their own fish is a gameplay defect,
+# not a grading preference, so the fill goes up. It is raised rather than the gobo dimmed or
+# the grade lifted because ambient adds light without touching the sun's volumetric scattering,
+# which is what the god rays are made of -- the shafts and the depth survive the change.
+SKY_INTENSITY = 2.2
 SKY_COLOR = dict(r=0.35, g=0.65, b=0.9)
 SKY_VOLUMETRIC_SCATTERING = 0.5
 
@@ -188,13 +206,32 @@ DOF = None
 # NiagaraSystem can), so a Niagara version would mean committing a hand-made .uasset, which this
 # project does not do. The camera is fixed, so translucent curtains standing across the view do
 # the job with a fully scripted material graph.
-# (tag, distance X, uniform scale, cell size cm, dot radius, brightness, drift cm/s)
 # Brightness was raised from 0.55/0.40/0.28 after a 1920x1080 capture: at the plan defaults the
-# specks were technically present but read as almost nothing on screen. Cell size and dot radius
-# are unchanged, so the DENSITY is the same -- only the specks' luminance went up.
+# specks were technically present but read as almost nothing on screen. That pass left the cell
+# sizes and dot radii alone, so only the specks' luminance went up.
+#
+# The near and mid specks read as white bokeh blobs -- dust on a camera lens -- not as marine
+# snow, in the 1920x1080 capture. The cause is APPARENT SIZE, not density or brightness. The
+# camera is fixed at 75 deg FOV, so a curtain at distance X is 2*X*tan(37.5) = 1.535*X cm wide
+# across 1920 px; a speck's diameter is 2 * DotRadius * CellSize cm, and the visible part is
+# roughly 60 % of that (the material's falloff is saturate(1 - d/radius), so the outer rim is
+# already transparent). That put the near speck at ~15 px and the mid at ~14 px measured off
+# the capture, where a few px is what reads as suspended matter.
+#
+# So the CELL SIZE is left alone -- it sets the density, which was already tuned against a
+# capture -- and only the RADIUS comes down, near 0.11 -> 0.05 and mid 0.13 -> 0.07, which
+# lands both layers near 12 px of full extent, i.e. ~7 px visible. The far curtain was already
+# at ~9 px extent and is unchanged.
+#
+# Dropping the near curtain entirely was the other option on the table. The per-item
+# attribution measurement (docs/reviews/2026-09-21-m4b-perf.md) says it is worth 0.6 fps --
+# below the run-to-run noise floor -- so removing it would have bought no frame budget at all,
+# and it is the layer that carries the parallax. It stays.
+#
+# (tag, distance X, uniform scale, cell size cm, dot radius, brightness, drift cm/s)
 SNOW_CURTAINS = [
-    ("near", 90.0,  3.0, 26.0, 0.11, 0.80, -7.0),
-    ("mid",  240.0, 7.0, 17.0, 0.13, 0.60, -5.0),
+    ("near", 90.0,  3.0, 26.0, 0.05, 0.80, -7.0),
+    ("mid",  240.0, 7.0, 17.0, 0.07, 0.60, -5.0),
     ("far",  480.0, 13.0, 11.0, 0.15, 0.42, -3.5),
 ]
 SNOW_COLOR = dict(r=0.72, g=0.86, b=0.92, a=1.0)
@@ -208,6 +245,26 @@ CAUSTIC_WARP = 2.0                      # phase warp amplitude, radians
 CAUSTIC_SHARPEN = 6.0                   # power applied to the normalised sum
 CAUSTIC_GAIN = 0.7                      # output = pow * GAIN + LIFT, kept within [0, 1]
 CAUSTIC_LIFT = 0.3
+
+# --- dev-only attribution switches -------------------------------------------
+# Per-item performance attribution needs each M4b addition switched off ONE AT A TIME with
+# everything else byte-identical; eyeballing a cost from a total is guessing. With none of
+# these set (the normal case, and the only case the committed level is ever built with) the
+# shipped configuration is produced. Used by docs/reviews/2026-09-21-m4b-perf.md.
+#   AQ_DROP_CURTAINS=near        drop just the near curtain
+#   AQ_DROP_CURTAINS=all         drop all three
+#   AQ_DROP_GOBO=coarse|fine     drop one gobo plane
+#   AQ_NO_SSAO=1                 post-process AO intensity 0
+#   AQ_PROP_COUNT=14             fewer props
+_drop_curtains = os.environ.get("AQ_DROP_CURTAINS", "")
+if _drop_curtains == "all":
+    SNOW_CURTAINS = []
+elif _drop_curtains:
+    SNOW_CURTAINS = [c for c in SNOW_CURTAINS if c[0] != _drop_curtains]
+DROP_GOBO = os.environ.get("AQ_DROP_GOBO", "")
+if os.environ.get("AQ_NO_SSAO") == "1":
+    PP_AO_INTENSITY = 0.0
+PROP_COUNT = int(os.environ.get("AQ_PROP_COUNT", PROP_COUNT))
 # -----------------------------------------------------------------------------
 
 eal = unreal.EditorAssetLibrary
@@ -697,10 +754,12 @@ def spawn_gobo(label, loc, scale, mat):
     return a
 
 
-spawn_gobo("SurfaceGobo", (400, 0, GOBO_Z), GOBO_SCALE, m_gobo)
-spawn_gobo("SurfaceGoboCoarse",
-           (GOBO_COARSE_XY[0], GOBO_COARSE_XY[1], GOBO_COARSE_Z),
-           GOBO_COARSE_SCALE, m_gobo_coarse)
+if DROP_GOBO != "fine":
+    spawn_gobo("SurfaceGobo", (400, 0, GOBO_Z), GOBO_SCALE, m_gobo)
+if DROP_GOBO != "coarse":
+    spawn_gobo("SurfaceGoboCoarse",
+               (GOBO_COARSE_XY[0], GOBO_COARSE_XY[1], GOBO_COARSE_Z),
+               GOBO_COARSE_SCALE, m_gobo_coarse)
 
 cam = spawn(unreal.CameraActor, CAM_LOC, CAM_ROT, label="DiverCamera")
 cam.tags = [unreal.Name("DiverCamera")]
@@ -803,14 +862,19 @@ for i, (mesh_path, scale_range) in enumerate(mesh_order):
     half = PROP_HALF_EXTENTS[name]
 
     def draw():
-        """One seeded candidate placement, pushed clear of the camera lane."""
+        """One seeded candidate placement, pushed clear of the camera lane.
+
+        The scale is drawn BEFORE the lane push because the push distance depends on the
+        prop's own radius: the lane is cleared by the prop's edge, not by its pivot.
+        """
         x = prng.uniform(*PROP_X)
         y = prng.uniform(*PROP_Y)
-        lane = lane_half_width(x)
-        if abs(y) < lane:
-            y = math.copysign(lane + PROP_CLEAR_MARGIN, y if y != 0.0 else 1.0)
         scale = prng.uniform(*scale_range)
-        return x, y, scale, max(half) * scale
+        radius = max(half) * scale
+        keep_out = lane_half_width(x) + radius + PROP_CLEAR_MARGIN
+        if abs(y) < keep_out:
+            y = math.copysign(keep_out, y if y != 0.0 else 1.0)
+        return x, y, scale, radius
 
     def fits(cand, factor):
         cx, cy, _, cr = cand

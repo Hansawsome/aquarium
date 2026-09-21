@@ -168,8 +168,17 @@ for prop in props:
     prop_mesh_names.add(mesh_name)
     loc = prop.get_actor_location()
     lane = PROP_CLEAR_RADIUS_Y + (loc.x - PROP_CLEAR_NEAR_X) * PROP_CLEAR_TAPER
-    assert abs(loc.y) >= lane - 1.0, \
-        "%s at (%.1f, %.1f) blocks the camera lane (half-width %.1f)" % (label, loc.x, loc.y, lane)
+    # The lane must be clear of the prop's BODY, not just its pivot. Checking the pivot alone
+    # let a boulder with a 137 cm radius stand centred 65 cm off the axis and swallow the
+    # player's fish at X=220 in the M4b review frame. The radius is taken from the mesh's own
+    # bounds rather than from a table copied out of build_reef_m1.py, so the two cannot drift
+    # apart silently. The tilt (up to PROP_TILT_DEG) widens the footprint by well under the
+    # build script's clearance margin, hence the small tolerance.
+    extent = mesh.get_bounds().box_extent
+    radius = max(extent.x, extent.y) * abs(prop.get_actor_scale3d().x)
+    assert abs(loc.y) >= lane + radius - 2.0, \
+        "%s at (%.1f, %.1f) r=%.1f blocks the camera lane (half-width %.1f, needs |y| >= %.1f)" \
+        % (label, loc.x, loc.y, radius, lane, lane + radius)
     # M4b Task 8: per-instance variation. A tint instance must be assigned (the plain material
     # would mean every prop of a type is the same colour) and the actor must actually be tilted
     # and stretched, within the tuned limits.
