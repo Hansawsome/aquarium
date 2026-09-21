@@ -49,7 +49,10 @@ APP="${1:?usage: verify_package.sh <Aquarium.app> [config]}"
 CONFIG="${2:-Development}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCAN="$ROOT/scripts/aq_scan.py"
-BIN="$APP/Contents/MacOS/Aquarium"
+# The executable is NOT always called "Aquarium": the Shipping bundle ships
+# Contents/MacOS/Aquarium-Mac-Shipping. Hard-coding the Development name would
+# make every Shipping check exit before it ran.
+BIN="$(find "$APP/Contents/MacOS" -maxdepth 1 -type f -perm -u+x -print -quit 2>/dev/null || true)"
 UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.8}"
 FAIL=0
 
@@ -58,7 +61,7 @@ bad()  { say "$1" "FAIL  $2"; FAIL=1; }
 good() { say "$1" "ok    $2"; }
 note() { say "$1" "note  $2"; }
 
-[[ -x "$BIN" ]] || { echo "no executable at $BIN" >&2; exit 1; }
+[[ -n "$BIN" && -x "$BIN" ]] || { echo "no executable under $APP/Contents/MacOS" >&2; exit 1; }
 [[ -x "$SCAN" ]] || { echo "no scanner at $SCAN" >&2; exit 1; }
 SCRATCH_TMP="$(mktemp)"; trap 'rm -f "$SCRATCH_TMP"' EXIT
 
@@ -77,7 +80,8 @@ else
 fi
 
 # inert data hits, reported so they cannot quietly grow
-MCP_DATA="$("$SCAN" ModelContextProtocol "$APP/Contents/UE/Aquarium/Content/Paks" 2>/dev/null || true)"
+PAKS="$(find "$APP/Contents/UE" -type d -name Paks -print -quit 2>/dev/null || true)"
+MCP_DATA="$([[ -n "$PAKS" ]] && "$SCAN" ModelContextProtocol "$PAKS" 2>/dev/null || true)"
 if [[ -n "$MCP_DATA" ]]; then
   note "mcp-data" "inert name-table/config strings in cooked data (see header):"
   echo "$MCP_DATA" | sed 's|^|                               |'
@@ -117,7 +121,7 @@ else
 fi
 
 # ---------- 4. Korean font must be in the package (F-04) ----------
-if [[ -n "$("$SCAN" NotoSansKR "$APP/Contents/UE/Aquarium/Content/Paks" 2>/dev/null)" ]]; then
+if [[ -n "$PAKS" && -n "$("$SCAN" NotoSansKR "$PAKS" 2>/dev/null)" ]]; then
   good "font-present" "NotoSansKR found in cooked data"
 else
   bad "font-present" "Korean font not in the package -- F-04 would render tofu"

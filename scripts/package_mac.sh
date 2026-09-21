@@ -91,10 +91,14 @@ if [[ $RC -ne 0 ]]; then
   fi
 fi
 
-APP="$(find "$OUT" -maxdepth 3 -name 'Aquarium.app' -print -quit)"
+# NOT just 'Aquarium.app': only the Development bundle is called that. Shipping
+# produces Aquarium-Mac-Shipping.app, and hard-coding the Development name made
+# this script report "no Aquarium.app" after a Shipping build that had in fact
+# succeeded -- the package was already sitting in $OUT.
+APP="$(find "$OUT" -maxdepth 3 -name 'Aquarium*.app' -print -quit)"
 [[ -n "$APP" ]] || { echo "ERROR: no Aquarium.app under $OUT" >&2; exit 1; }
-BIN="$APP/Contents/MacOS/Aquarium"
-[[ -x "$BIN" ]] || { echo "ERROR: no executable at $BIN" >&2; exit 1; }
+BIN="$(find "$APP/Contents/MacOS" -maxdepth 1 -type f -perm -u+x -print -quit)"
+[[ -n "$BIN" && -x "$BIN" ]] || { echo "ERROR: no executable at $BIN" >&2; exit 1; }
 codesign -dv "$APP" 2>&1 | head -5
 
 echo "APP=$APP"
