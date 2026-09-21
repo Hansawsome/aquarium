@@ -124,6 +124,17 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	// that answer. Everything after this point (obstacles, boundary, StepMotion, Clamp) still runs,
 	// so a startled fish can neither swim through a rock (M4c) nor leave the visible area (F-07,
 	// and the M3 guarantee that the wall always gets the last word).
+	// 회피 층(M8). 입력/Wander와 **같은 층**이다 -- "어디로 가고 싶은가"의 답을
+	// 대체하는 것이지 그 답에 붙이는 보정이 아니다. 도망보다 **앞**인 이유: 클릭의
+	// 결과는 아이가 읽어야 하는 사건이고(M5가 무리를 도망 뒤로 보낸 것과 같은 이유),
+	// 이미 도망 중인 놈은 그것만으로 충분히 어렵다. 즉 아래 Flee 블록이 이 값을
+	// 덮어쓰는 것이 **의도된 우선순위**다. 그리고 경계는 여전히 끝까지 마지막이다.
+	EvadeValue.Step(DeltaSeconds);
+	const bool bEvading = EvadeValue.Active();
+	if (bEvading)
+	{
+		Desired = EvadeValue.Direction();
+	}
 	Flee.Step(DeltaSeconds);
 	const bool bFleeing = Flee.State() == aquarium::BehaviorState::Fleeing;
 	if (bFleeing)
@@ -140,12 +151,14 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	// 돌진은 기존 배율과 **같은 자리에서** 곱해진다. 그래야 속도 상수가 여전히
 	// 규칙 계층 한 곳에만 있다.
 	Dash.Step(DeltaSeconds, DashParamsValue);
-	MotionParamsValue.maxSpeed = MaxSpeed * Flee.SpeedScale(FleeParamsValue) * StyleScale * Dash.SpeedScale(DashParamsValue);
+	MotionParamsValue.maxSpeed = MaxSpeed * Flee.SpeedScale(FleeParamsValue) * StyleScale
+		* Dash.SpeedScale(DashParamsValue) * EvadeValue.SpeedScale(EvadeParamsValue);
 	// Schooling applies to background fish only. The player's fish is never a boid: arrow keys
 	// must map to motion with nothing mixed in, or the child gets "I pressed left and it went
 	// somewhere else" (F-05/F-07). The other direction -- background fish reacting to the player
 	// -- is handled inside AsNeighbor(), which marks the player fish avoidOnly.
-	if (!bPlayerControlled && !bIsPlayerFish && !bFleeing)
+	// 피하는 중에 무리가 방향을 섞으면 "옆으로 튄다"가 흐려진다.
+	if (!bPlayerControlled && !bIsPlayerFish && !bFleeing && !bEvading)
 	{
 		UWorld* W = GetWorld();
 		UFishSchoolSubsystem* School = W ? W->GetSubsystem<UFishSchoolSubsystem>() : nullptr;
