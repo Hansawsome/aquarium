@@ -243,4 +243,40 @@ bool FControllerClickNeedsSession::RunTest(const FString&)
 	return true;
 }
 
+
+// Dev-only scripted clicks. The grammar is pinned here because the -AquariumAutoInput parser
+// taught this project that a silently-ignored bad token produces a convincing but empty capture.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FControllerAutoClickParses, "Aquarium.Controller.AutoClickPatternParses",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FControllerAutoClickParses::RunTest(const FString&)
+{
+	FString Pattern;
+	TestTrue(TEXT("flag is found"), ADiverPlayerController::ParseAutoClick(
+		TEXT("-AquariumAutoClick=4.0@0.50x0.46,7.25@0.12x0.80"), Pattern));
+	TestEqual(TEXT("pattern survives the commas"), Pattern, FString(TEXT("4.0@0.50x0.46,7.25@0.12x0.80")));
+	TestFalse(TEXT("absent flag"), ADiverPlayerController::ParseAutoClick(TEXT("-Other=1"), Pattern));
+	TestFalse(TEXT("null command line"), ADiverPlayerController::ParseAutoClick(nullptr, Pattern));
+
+	const TArray<ADiverPlayerController::FAutoClick> Good =
+		ADiverPlayerController::BuildAutoClicks(TEXT("7.25@0.12x0.80, 4.0@0.50x0.46"));
+	TestEqual(TEXT("two clicks"), Good.Num(), 2);
+	// Written out of order on purpose: they must fire in time order.
+	TestEqual(TEXT("first time"), Good[0].TimeSeconds, 4.0f, 1e-3f);
+	TestEqual(TEXT("first nx"), static_cast<float>(Good[0].Normalized.X), 0.50f, 1e-3f);
+	TestEqual(TEXT("first ny"), static_cast<float>(Good[0].Normalized.Y), 0.46f, 1e-3f);
+	TestEqual(TEXT("second time"), Good[1].TimeSeconds, 7.25f, 1e-3f);
+
+	// Every one of these is the kind of token an author invents from memory. All must be dropped.
+	const TArray<ADiverPlayerController::FAutoClick> Bad = ADiverPlayerController::BuildAutoClicks(
+		TEXT("4.0:0.5x0.5,4.0@0.5,4.0@0.5x0.5x0.5,@0.5x0.5,4.0@1.5x0.5,4.0@-0.1x0.5,-1@0.5x0.5,abc@0.5x0.5"));
+	TestEqual(TEXT("every malformed token is dropped"), Bad.Num(), 0);
+
+	FString ClickCsvPath;
+	TestTrue(TEXT("click log path is found"), ADiverPlayerController::ParseClickLogPath(
+		TEXT("-AquariumClickLog=/tmp/clicks.csv"), ClickCsvPath));
+	TestEqual(TEXT("click log path survives"), ClickCsvPath, FString(TEXT("/tmp/clicks.csv")));
+	TestFalse(TEXT("absent click log flag"), ADiverPlayerController::ParseClickLogPath(TEXT("-Other=1"), ClickCsvPath));
+	return true;
+}
+
 #endif

@@ -65,6 +65,25 @@ public:
 	// playback, e.g. "R3,U2,L3,D2,0 1".
 	static bool ParseAutoInput(const TCHAR* CmdLine, FString& OutPattern);
 
+	// One scripted click: when, and where in the viewport (0..1 of width/height).
+	struct FAutoClick
+	{
+		float TimeSeconds = 0.f;
+		FVector2D Normalized = FVector2D::ZeroVector;
+	};
+	// Parses -AquariumAutoClick=<pattern>; false when absent or empty.
+	static bool ParseAutoClick(const TCHAR* CmdLine, FString& OutPattern);
+	// Parses "<sec>@<nx>x<ny>[,<sec>@<nx>x<ny>...]". The separators are exactly one '@' and one
+	// 'x'; there is NO colon form. Malformed or out-of-range tokens are WARNED ABOUT AND DROPPED,
+	// so every capture harness must assert that the warning count is zero and that the "armed N"
+	// count matches what it asked for -- M4c produced a completely input-free capture that looked
+	// entirely plausible because every token it used had been invented and silently dropped.
+	static TArray<FAutoClick> BuildAutoClicks(const FString& Pattern);
+	// Parses -AquariumClickLog=<absolute csv path>; false when absent or empty. The CSV is the
+	// only verification the deprojection path ever gets: -nullrhi has no game viewport, so
+	// automation can only start at HandleClickRay.
+	static bool ParseClickLogPath(const TCHAR* CmdLine, FString& OutPath);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -126,4 +145,19 @@ private:
 	void AdvanceAutoInput(float DeltaSeconds);
 	// Parses "R3,U2,0 1" into steps; malformed entries are skipped with a warning.
 	static TArray<FAutoInputStep> BuildAutoInputSteps(const FString& Pattern);
+
+	TArray<FAutoClick> AutoClicks;
+	int32 NextAutoClick = 0;
+	float AutoClickElapsed = 0.f;
+	void StartAutoClickIfRequested();
+	void AdvanceAutoClick(float DeltaSeconds);
+	// Dev-only click record: one row per click attempt, real or scripted. NEVER a nickname.
+	FString ClickLogPath;
+	TArray<FString> ClickLogRows;
+	void StartClickLogIfRequested();
+	void WriteClickLog();
+	// Filled by HandleClickRay for the click log: the plane X of the fish that was hit (0 for
+	// empty water) and that fish's behaviour state just before the touch.
+	float LastClickPlaneX = 0.f;
+	FString LastClickState = TEXT("None");
 };
