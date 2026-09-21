@@ -55,23 +55,65 @@ def fade(samples, in_s=0.004, out_s=0.010, rate=RATE):
 
 
 def swim(rate=RATE):
-    """1초 루프. 넓은 대역 잡음을 한 옥타브 폭으로 흔드는 필터에 통과시킨 물살 소리.
-    음높이 변화는 여기서 굽지 않는다 -- 엔진이 재생 피치로 준다(aquarium::SwimPitch)."""
-    rnd = random.Random(20260921)
+    """1초 루프. **물방울이다** -- 개정 전에는 넓은 대역 잡음을 흔든 「푸슝」이었고,
+    사용자가 실제로 플레이한 뒤 "푹숑보다 물방울 소리가 좋을 듯"이라고 했다.
+
+    물방울 하나는 **짧고 음이 올라가는** 사인이다(공동이 닫히며 주파수가 오른다).
+    그것이 잡음과 다른 점이고, 무게중심이 그 차이를 잰다 -- 옛 잡음 글라이드는
+    2173Hz였고 물방울은 그 절반 아래다. 밝기를 눌러 둔 이유는 시나리오의 금지
+    목록에 '동글동글 귀여운 기포'가 있기 때문이다: 방울은 낮고 짧고 옅다.
+
+    **이음매.** 루프이므로 fade()를 쓰지 않는다 -- 양 끝을 0으로 내리면 1초마다
+    소리가 꺼졌다 켜진다. 대신 모든 성분을 **주기적으로** 쓴다: 방울은 버퍼 끝을
+    넘으면 앞으로 감아 이어 쓰고(원형 기록), 낮은 웅—은 루프당 정수 주기이며,
+    물살 잡음 바닥은 자기 자신과 원형 교차 페이드해 이음매를 지운다.
+
+    음높이 변화는 여기서 굽지 않는다 -- 엔진이 재생 피치로 준다(aquarium::SwimPitch).
+    빨리 헤엄칠수록 방울이 높아지고 **동시에 촘촘해진다**(루프 전체가 빨라지므로)."""
+    rnd = random.Random(20260922)
     n = int(1.0 * rate)
     out = [0.0] * n
+
+    # --- 물살 바닥. 아주 옅은 저역 잡음 한 겹. 방울이 놓일 물이다.
+    m = n + int(0.25 * rate)           # 교차 페이드에 쓸 꼬리만큼 더 만든다
+    bed = [0.0] * m
     lp1 = lp2 = 0.0
+    for i in range(m):
+        w = rnd.uniform(-1.0, 1.0)
+        lp1 += 0.045 * (w - lp1)       # 2극 저역통과: 「쉬—」가 아니라 「무—」
+        lp2 += 0.045 * (lp1 - lp2)
+        bed[i] = lp2
+    xf = int(0.25 * rate)
     for i in range(n):
-        t = i / n                      # 0..1, 루프 위상
-        white = rnd.uniform(-1.0, 1.0)
-        # 시간에 따라 컷오프가 오르내리는 2극 저역통과. 물이 밀리는 「쉬—」.
-        cut = 0.10 + 0.05 * math.sin(2.0 * math.pi * t)
-        lp1 += cut * (white - lp1)
-        lp2 += cut * (lp1 - lp2)
-        # 아주 낮은 웅— 하나를 섞어 물속의 두께를 만든다.
-        hum = 0.18 * math.sin(2.0 * math.pi * 3.0 * t)
-        out[i] = 0.85 * lp2 + hum * 0.25
-    return fade(out, in_s=0.05, out_s=0.05, rate=rate)
+        if i < xf:                      # 앞 xf 구간을 꼬리와 섞어 이음매를 지운다
+            a = i / xf
+            out[i] += 2.6 * (bed[i] * a + bed[i + n] * (1.0 - a))
+        else:
+            out[i] += 2.6 * bed[i]
+
+    # --- 물속의 두께. 루프당 정수 주기라 이음매가 없다.
+    for i in range(n):
+        out[i] += 0.055 * math.sin(2.0 * math.pi * 3.0 * i / n)
+
+    # --- 방울들. 루프 위상, 시작 주파수, 크기. 일정 간격이면 점선으로 들리므로
+    #     불규칙하게 놓는다. 여덟 개면 헤엄치는 동안 끊기지 않고 흐른다.
+    drops = (
+        (0.02, 430.0, 0.95), (0.14, 610.0, 0.62), (0.26, 360.0, 0.80),
+        (0.41, 720.0, 0.50), (0.53, 480.0, 0.88), (0.66, 300.0, 0.70),
+        (0.78, 560.0, 0.55), (0.90, 400.0, 0.85),
+    )
+    for phase0, f0, amp in drops:
+        i0 = int(phase0 * n)
+        dn = int(0.075 * rate)          # 75ms. 이보다 길면 '뽁'이 아니라 '삐'가 된다
+        ph = 0.0
+        for k in range(dn):
+            t = k / rate
+            # 공동이 닫히며 주파수가 **오른다**. 이것이 물방울의 서명이다.
+            f = f0 * (1.0 + 1.6 * (1.0 - math.exp(-55.0 * t)))
+            ph += 2.0 * math.pi * f / rate
+            env = math.exp(-42.0 * t) * (1.0 - math.exp(-900.0 * t))
+            out[(i0 + k) % n] += amp * 0.30 * env * math.sin(ph)
+    return out
 
 
 def startle(rate=RATE):
@@ -192,6 +234,71 @@ SOUNDS = (
 )
 
 
+# S_Swim이 **물방울인지 푸슝인지**를 숫자로 가른다. 귀로는 확인할 수 없으므로
+# 이 두 줄이 유일한 자동 증거다.
+#
+# ① 무게중심 상한. 잡음이 지배하면 무게중심이 올라간다 -- 개정 전 「푸슝」은 같은
+#    측정에서 2173.1Hz였고 물방울은 993.6Hz다. 옛 swim()으로 되돌리는 변이에서
+#    실제로 빨간불을 확인했다(2173.1 > 1400).
+# ② 이음매. 루프의 마지막 표본과 첫 표본 사이의 단차가 보통 단차보다 크면 1초마다
+#    「딱」이 난다. fade()로 양 끝을 0으로 내리는 방식은 단차는 없애지만 1초마다
+#    소리가 꺼졌다 켜지므로 쓰지 않는다 -- 그래서 파형이 **실제로 주기적**이어야 한다.
+SWIM_CENTROID_MAX_HZ = 1400.0
+
+
+def swim_centroid_hz(path):
+    """measure_centroid.py와 같은 계산. 그 스크립트를 import하면 __main__에서
+    sys.argv를 훑으므로 여기서 다시 쓴다(같은 식, 같은 제로패딩)."""
+    import cmath
+    with wave.open(path) as w:
+        n = w.getnframes()
+        rate = w.getframerate()
+        d = array.array("h")
+        d.frombytes(w.readframes(n))
+    xs = [v / 32768.0 for v in d]
+    N = 1
+    while N < len(xs):
+        N *= 2
+    xs += [0.0] * (N - len(xs))
+
+    def fft(a):
+        m = len(a)
+        if m == 1:
+            return a
+        e = fft(a[0::2])
+        o = fft(a[1::2])
+        out = [0j] * m
+        for k in range(m // 2):
+            t = cmath.exp(-2j * math.pi * k / m) * o[k]
+            out[k] = e[k] + t
+            out[k + m // 2] = e[k] - t
+        return out
+
+    sp = fft([complex(v, 0) for v in xs])
+    num = den = 0.0
+    for k in range(1, N // 2):
+        mag = abs(sp[k])
+        num += mag * (k * rate / N)
+        den += mag
+    return num / den if den else 0.0
+
+
+def check_swim_loop(path):
+    with wave.open(path) as w:
+        n = w.getnframes()
+        d = array.array("h")
+        d.frombytes(w.readframes(n))
+    steps = sorted(abs(d[i + 1] - d[i]) for i in range(n - 1))
+    seam = abs(d[0] - d[n - 1])
+    typical = steps[int(0.99 * len(steps))]
+    assert seam <= typical, \
+        "S_Swim loop seam jumps %d, above the 99th-percentile step %d" % (seam, typical)
+    c = swim_centroid_hz(path)
+    assert c < SWIM_CENTROID_MAX_HZ, \
+        "S_Swim centroid %.1f Hz >= %.1f Hz -- that is noise, not droplets" % (c, SWIM_CENTROID_MAX_HZ)
+    return seam, typical, c
+
+
 def main():
     os.makedirs(HERE, exist_ok=True)
     rows = []
@@ -206,6 +313,8 @@ def main():
         assert peak > 1e-6, "%s is silent" % name      # 무음 WAV는 조용히 통과하는 실패다
         rows.append("%s:%d:%s" % (name, count, digest))
         print("  %-14s frames=%6d sha256=%s" % (name, count, digest))
+    seam, typical, cent = check_swim_loop(os.path.join(HERE, "S_Swim.wav"))
+    print("  S_Swim loop seam=%d (p99 step=%d) centroid=%.1f Hz" % (seam, typical, cent))
     print("SOUNDS_OK count=%d rate=%d [%s]" % (len(rows), RATE, " ".join(rows)))
 
 
