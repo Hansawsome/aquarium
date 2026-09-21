@@ -65,6 +65,24 @@ void ADiverPlayerController::BeginPlay()
 	}
 	Entry->OnSubmitted.BindUObject(this, &ADiverPlayerController::HandleSubmitted);
 	Hud->OnExit.BindUObject(this, &ADiverPlayerController::RequestExit);
+	Hud->OnToggleMute.BindLambda([this]()
+	{
+		if (UWorld* W = GetWorld())
+		{
+			if (UAquariumAudioSubsystem* Audio = W->GetSubsystem<UAquariumAudioSubsystem>())
+			{
+				Audio->ToggleMuted();
+			}
+		}
+	});
+	// 명령줄 -AquariumMuted로 켜진 상태라면 그림도 그 상태로 시작해야 한다.
+	if (UWorld* W = GetWorld())
+	{
+		if (UAquariumAudioSubsystem* Audio = W->GetSubsystem<UAquariumAudioSubsystem>())
+		{
+			Hud->SetMutedVisual(Audio->IsMuted());
+		}
+	}
 	Entry->AddToViewport(kEntryZOrder);
 	Hud->AddToViewport(kHudZOrder);
 	ShowEntry();
@@ -146,7 +164,7 @@ void ADiverPlayerController::HandleClick()
 	// The HUD exit button sits on top of the scene; a click that the button is taking must not
 	// also startle whatever fish happens to be behind it. Slate handles the button itself, but
 	// under FInputModeGameAndUI the key still reaches us, so this guard is ours to make.
-	if (Hud && Hud->IsPointerOverExitButton())
+	if (Hud && Hud->IsPointerOverButton())
 	{
 		return;
 	}

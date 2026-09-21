@@ -5,6 +5,8 @@
 #include "Components/ButtonSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/Image.h"
+#include "Engine/Texture2D.h"
 #include "Components/TextBlock.h"
 #include "UiFont.h"
 
@@ -18,6 +20,10 @@ namespace
 	// Translucent light button / dark label: legible over the underwater scene without hiding it.
 	const FLinearColor kButtonTint(0.98f, 0.9f, 0.7f, 0.75f);
 	const FLinearColor kLabelTint(0.05f, 0.05f, 0.08f);
+	// 나가기 버튼과 같은 여백, 그 **왼쪽**에 놓는다. 나가기는 우상단 구석에
+	// 그대로 두고(M2 설계: 작고 눈에 안 띄는 자리), 뮤트는 그 옆이다.
+	constexpr float kMuteSize = 44.f;
+	constexpr float kMuteGap = 92.f;   // 나가기 버튼 너비 + 여백
 }
 
 void UHudWidget::HandleExitClicked()
@@ -53,13 +59,56 @@ TSharedRef<SWidget> UHudWidget::RebuildWidget()
 			ButtonSlot->SetPosition(FVector2D(-kEdgeMargin, kEdgeMargin));
 			ButtonSlot->SetAutoSize(true);
 		}
+
+		SoundOnTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/T_SoundOn.T_SoundOn"));
+		SoundOffTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/T_SoundOff.T_SoundOff"));
+
+		MuteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("MuteButton"));
+		MuteButton->OnClicked.AddDynamic(this, &UHudWidget::HandleMuteClicked);
+		MuteButton->SetBackgroundColor(kButtonTint);
+
+		// 그림만 넣는다. 글자는 한 자도 넣지 않는다(시나리오: 아이는 글자를 읽지 않는다).
+		MuteImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("MuteIconImage"));
+		MuteImage->SetBrushSize(FVector2D(kMuteSize * 0.62f, kMuteSize * 0.62f));
+		if (UButtonSlot* IconSlot = Cast<UButtonSlot>(MuteButton->AddChild(MuteImage)))
+		{
+			IconSlot->SetPadding(FMargin(6.f));
+		}
+		SetMutedVisual(bMutedVisual);
+
+		if (UCanvasPanelSlot* MuteSlot = Root->AddChildToCanvas(MuteButton))
+		{
+			MuteSlot->SetAnchors(FAnchors(1.f, 0.f));
+			MuteSlot->SetAlignment(FVector2D(1.f, 0.f));
+			MuteSlot->SetPosition(FVector2D(-kEdgeMargin - kMuteGap, kEdgeMargin));
+			MuteSlot->SetSize(FVector2D(kMuteSize, kMuteSize));
+		}
 	}
 	return Super::RebuildWidget();
 }
 
 #undef LOCTEXT_NAMESPACE
 
-bool UHudWidget::IsPointerOverExitButton() const
+void UHudWidget::HandleMuteClicked()
 {
-	return ExitButton != nullptr && ExitButton->IsHovered();
+	OnToggleMute.ExecuteIfBound();
+	SetMutedVisual(!bMutedVisual);
+}
+
+void UHudWidget::SetMutedVisual(bool bInMuted)
+{
+	bMutedVisual = bInMuted;
+	UTexture2D* Tex = bMutedVisual ? SoundOffTexture.Get() : SoundOnTexture.Get();
+	if (MuteImage && Tex) { MuteImage->SetBrushFromTexture(Tex, /*bMatchSize*/ false); }
+}
+
+UTexture2D* UHudWidget::CurrentMuteTexture() const
+{
+	return bMutedVisual ? SoundOffTexture.Get() : SoundOnTexture.Get();
+}
+
+bool UHudWidget::IsPointerOverButton() const
+{
+	return (ExitButton != nullptr && ExitButton->IsHovered())
+		|| (MuteButton != nullptr && MuteButton->IsHovered());
 }
