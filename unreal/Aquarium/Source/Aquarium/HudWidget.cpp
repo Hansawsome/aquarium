@@ -58,3 +58,8 @@ TSharedRef<SWidget> UHudWidget::RebuildWidget()
 }
 
 #undef LOCTEXT_NAMESPACE
+
+bool UHudWidget::IsPointerOverExitButton() const
+{
+	return ExitButton != nullptr && ExitButton->IsHovered();
+}

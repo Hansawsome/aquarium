@@ -7,6 +7,7 @@
 #include "aquarium/Boids.h"
 #include "aquarium/Bounds.h"
 #include "aquarium/Facing.h"
+#include "aquarium/Flee.h"
 #include "aquarium/Heading.h"
 #include "aquarium/Motion.h"
 #include "aquarium/Obstacles.h"
@@ -77,6 +78,17 @@ public:
 	// Equality key derived from the mesh asset. Never logged, never stored.
 	int32 SpeciesKey() const { return SpeciesKeyValue; }
 
+	// F-09..F-12: startles this fish away from a world-space touch point. The point is expected to
+	// be on (or near) this fish's swim plane; only its Y and Z are used, because the plane's X is
+	// what made the click hit this fish in the first place. Re-entrant by design: the rules layer
+	// decides what a second touch means (ignored mid-flee, restarts during recovery).
+	void ApplyFleeFrom(const FVector& WorldTouch);
+	aquarium::BehaviorState FleeState() const { return Flee.State(); }
+	// This fish as a click can see it, in the shared swim frame. Half extents are DERIVED from the
+	// rendered bounds (so the player fish's 34 cm normalization scale is included automatically);
+	// no per-species radius table is copied into C++.
+	aquarium::ClickTarget AsClickTarget() const;
+
 	// Sets the desired swim direction in swim-plane coordinates (X = screen right, Y = screen up).
 	// Stored normalized, so a longer input vector can never exceed the normal swim speed. Only read
 	// when bPlayerControlled is true; a zero vector means "no input", and the fish coasts to a stop.
@@ -114,6 +126,8 @@ private:
 	aquarium::SwimAnimParams AnimParams;
 	aquarium::FacingParams FacingParamsValue;
 	aquarium::BoidsParams BoidsParamsValue;
+	aquarium::FleeStateMachine Flee;
+	aquarium::FleeParams FleeParamsValue;
 	int32 SpeciesKeyValue = 0;
 	int32 ComputeSpeciesKey() const;
 	void BuildSortedNeighbors(const std::vector<aquarium::BoidNeighbor>& Snapshot, const aquarium::Vec2& Shared);

@@ -11,6 +11,8 @@
 #include "Engine/SkeletalMesh.h"
 #include "aquarium/Boids.h"
 #include "aquarium/Facing.h"
+#include "aquarium/Flee.h"
+#include "aquarium/SwimAnimation.h"
 
 namespace
 {
@@ -723,6 +725,411 @@ bool FFishSchoolDevTogglesParse::RunTest(const FString&)
 		UFishSchoolSubsystem::ParseDisableFlag(nullptr, TEXT("AquariumNoSchooling")));
 	return TestFalse(TEXT("a null flag is false, not a crash"),
 		UFishSchoolSubsystem::ParseDisableFlag(TEXT("Aquarium -AquariumNoSchooling"), nullptr));
+}
+
+// F-10/F-11: a clicked fish turns away from the touch point, speeds up, and comes back.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorFleesFromTouch, "Aquarium.Fish.FleesFromTouchPoint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorFleesFromTouch::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = World->SpawnActor<AFishActor>();
+	Fish->PlaneOrigin = FVector(400.f, 0.f, 100.f);
+	Fish->InitializeSwim();
+	// Let it get moving first, so the flee has to overcome a real velocity.
+	for (int32 i = 0; i < 60; ++i) { Fish->StepSwim(1.f / 60.f); }
+
+	// Touch 20 cm to the fish's screen-left: it must end up moving screen-right.
+	const FVector Touch = Fish->GetActorLocation() - FVector(0.f, 20.f, 0.f);
+	Fish->ApplyFleeFrom(Touch);
+	TestTrue(TEXT("state is Fleeing right after the touch"),
+		Fish->FleeState() == aquarium::BehaviorState::Fleeing);
+
+	// The touch is head-on to this fish's heading, so the flee is a full reversal: it must END UP
+	// moving screen-right (+Y) by the time the 0.8 s flee is over. Measured over two consecutive
+	// frames so this reads the velocity, not a position that a reversal leaves almost unchanged.
+	for (int32 i = 0; i < 47; ++i) { Fish->StepSwim(1.f / 60.f); }
+	const double YNearEnd = Fish->GetActorLocation().Y;
+	Fish->StepSwim(1.f / 60.f);
+	TestTrue(TEXT("moving away from the touch (screen right = +Y)"),
+		Fish->GetActorLocation().Y > YNearEnd);
+	TestTrue(TEXT("touch really was on the fish's left"), Touch.Y < Fish->GetActorLocation().Y);
+	// PLAN DEVIATION, see the report: the plan asserted "flee is faster than cruising" 0.5 s into
+	// THIS flee, which is physically impossible here. A head-on reversal from 30 cm/s costs 0.75 s
+	// at decel = 40 cm/s^2 before the speed can rise at all, and the whole flee lasts 0.8 s
+	// (measured: speed fell 29.72 -> 24.74 over those 30 frames). The speed burst is therefore
+	// checked on a second fish whose flee runs ALONG its heading, and against the fish's own
+	// MaxSpeed -- a bound aquarium::StepMotion cannot cross unless FleeParams::fleeSpeedScale is
+	// actually applied to MotionParamsValue.maxSpeed.
+	{
+		AFishActor* Runner = World->SpawnActor<AFishActor>();
+		Runner->PlaneOrigin = FVector(400.f, 0.f, 100.f);
+		Runner->InitializeSwim();
+		for (int32 i = 0; i < 60; ++i) { Runner->StepSwim(1.f / 60.f); }
+		const FVector Before = Runner->GetActorLocation();
+		Runner->StepSwim(1.f / 60.f);
+		const FVector Heading = (Runner->GetActorLocation() - Before).GetSafeNormal();
+		const float RunnerCruise = Runner->CurrentSpeed();
+		// Touch BEHIND the fish, so "away from the touch" is the way it is already going.
+		Runner->ApplyFleeFrom(Runner->GetActorLocation() - Heading * 20.f);
+		float Peak = 0.f;
+		for (int32 i = 0; i < 48; ++i) { Runner->StepSwim(1.f / 60.f); Peak = FMath::Max(Peak, Runner->CurrentSpeed()); }
+		TestTrue(FString::Printf(TEXT("flee is faster than cruising (%.2f > %.2f)"), Peak, RunnerCruise),
+			Peak > RunnerCruise * 1.2f);
+		TestTrue(FString::Printf(TEXT("flee exceeds the ordinary max speed (%.2f > %.2f)"), Peak, Runner->MaxSpeed),
+			Peak > Runner->MaxSpeed);
+	}
+	for (int32 i = 0; i < 20; ++i) { Fish->StepSwim(1.f / 60.f); }   // total 0.833 s -> Recovering
+	TestTrue(TEXT("recovering after 0.8 s"),
+		Fish->FleeState() == aquarium::BehaviorState::Recovering);
+	for (int32 i = 0; i < 80; ++i) { Fish->StepSwim(1.f / 60.f); }   // total 2.16 s -> Normal
+	TestTrue(TEXT("normal after 2.0 s"),
+		Fish->FleeState() == aquarium::BehaviorState::Normal);
+	return true;
+}
+
+// F-07: the boundary rule still gets the last word while a fish is fleeing.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorFleeStaysInsideArea, "Aquarium.Fish.FleeStaysInsideArea",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorFleeStaysInsideArea::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = World->SpawnActor<AFishActor>();
+	Fish->PlaneOrigin = FVector(400.f, 0.f, 100.f);
+	Fish->PlaneHalfWidth = 60.f;
+	Fish->PlaneHalfHeight = 40.f;
+	Fish->InitializeSwim();
+	// Click repeatedly from the opposite side so the flee direction always points at a wall.
+	float WorstY = 0.f, WorstZ = 0.f;
+	for (int32 i = 0; i < 600; ++i)
+	{
+		if (i % 120 == 0)
+		{
+			Fish->ApplyFleeFrom(Fish->GetActorLocation() - FVector(0.f, 30.f, 20.f));
+		}
+		Fish->StepSwim(1.f / 60.f);
+		WorstY = FMath::Max(WorstY, static_cast<float>(FMath::Abs(Fish->GetActorLocation().Y - Fish->PlaneOrigin.Y)));
+		WorstZ = FMath::Max(WorstZ, static_cast<float>(FMath::Abs(Fish->GetActorLocation().Z - Fish->PlaneOrigin.Z)));
+	}
+	// Derived from the actor's own half extents, never from a literal.
+	TestTrue(FString::Printf(TEXT("stays inside half width (%.2f <= %.2f)"), WorstY, Fish->PlaneHalfWidth),
+		WorstY <= Fish->PlaneHalfWidth + KINDA_SMALL_NUMBER);
+	TestTrue(FString::Printf(TEXT("stays inside half height (%.2f <= %.2f)"), WorstZ, Fish->PlaneHalfHeight),
+		WorstZ <= Fish->PlaneHalfHeight + KINDA_SMALL_NUMBER);
+	return true;
+}
+
+// F-12: a background fish goes back to wandering, not to a frozen heading.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorBackgroundResumesWander, "Aquarium.Fish.BackgroundResumesWanderAfterFlee",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorBackgroundResumesWander::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Ref = World->SpawnActor<AFishActor>();
+	AFishActor* Fish = World->SpawnActor<AFishActor>();
+	for (AFishActor* F : {Ref, Fish})
+	{
+		F->PlaneOrigin = FVector(400.f, 0.f, 100.f);
+		F->Seed = 7;
+		F->InitializeSwim();
+	}
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() - FVector(0.f, 25.f, 0.f));
+	for (int32 i = 0; i < 600; ++i) { Ref->StepSwim(1.f / 60.f); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("back to Normal"), Fish->FleeState() == aquarium::BehaviorState::Normal);
+	// Both fish have the same seed and the same wander target sequence, so once the flee is over
+	// the disturbed fish must be steering toward a live target again: its speed must be back to
+	// the ordinary cruising band rather than stuck at the flee burst.
+	TestTrue(FString::Printf(TEXT("speed back in the cruise band (%.2f vs %.2f)"),
+		Fish->CurrentSpeed(), Ref->CurrentSpeed()),
+		Fish->CurrentSpeed() <= Ref->CurrentSpeed() + 1.f);
+	TestTrue(TEXT("still swimming, not stalled"), Fish->CurrentSpeed() > 1.f);
+	return true;
+}
+
+// F-12: while fleeing, the flee beats the arrow keys; from recovery the CURRENT key applies.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorFleeBeatsArrowKeys, "Aquarium.Fish.FleeBeatsArrowKeys",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorFleeBeatsArrowKeys::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = World->SpawnActor<AFishActor>();
+	Fish->PlaneOrigin = FVector(220.f, 0.f, 105.f);
+	Fish->bIsPlayerFish = true;
+	Fish->bPlayerControlled = true;
+	Fish->InitializeSwim();
+	// A control fish holding exactly the same key and never clicked. PLAN DEVIATION, see the
+	// report: the plan asserted the clicked fish ends up RIGHT of where it was when clicked, which
+	// no amount of correct wiring can produce. The flee is head-on to a held key here, and
+	// aquarium::StepMotion turns the velocity at accel = 30 cm/s^2, so reversing a 40 cm/s leftward
+	// velocity needs 1.33 s while the whole flee lasts 0.8 s. "The flee beats the key" is therefore
+	// measured the only way physics allows: against a fish holding the SAME key with no click.
+	AFishActor* Control = World->SpawnActor<AFishActor>();
+	Control->PlaneOrigin = FVector(220.f, 0.f, 105.f);
+	Control->bIsPlayerFish = true;
+	Control->bPlayerControlled = true;
+	Control->InitializeSwim();
+	// The child is holding LEFT (screen -Y) the whole time.
+	for (int32 i = 0; i < 30; ++i)
+	{
+		Fish->SetInputDirection(FVector2D(-1.f, 0.f));
+		Control->SetInputDirection(FVector2D(-1.f, 0.f));
+		Fish->StepSwim(1.f / 60.f);
+		Control->StepSwim(1.f / 60.f);
+	}
+	TestEqual(TEXT("the two fish are in lockstep before the click"),
+		Fish->GetActorLocation().Y, Control->GetActorLocation().Y, 1e-3);
+
+	// The child clicks their OWN fish, on its left side, so the flee wants to go RIGHT.
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() - FVector(0.f, 15.f, 0.f));
+	for (int32 i = 0; i < 48; ++i)
+	{
+		Fish->SetInputDirection(FVector2D(-1.f, 0.f));   // still held, as the controller would
+		Control->SetInputDirection(FVector2D(-1.f, 0.f));
+		Fish->StepSwim(1.f / 60.f);
+		Control->StepSwim(1.f / 60.f);
+	}
+	TestTrue(FString::Printf(TEXT("flee wins over the held key (%.2f right of the unclicked control %.2f)"),
+		Fish->GetActorLocation().Y, Control->GetActorLocation().Y),
+		Fish->GetActorLocation().Y > Control->GetActorLocation().Y + 1.f);
+
+	// Run to the end of the flee, then keep holding LEFT through recovery.
+	for (int32 i = 0; i < 20; ++i) { Fish->SetInputDirection(FVector2D(-1.f, 0.f)); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("recovering"), Fish->FleeState() == aquarium::BehaviorState::Recovering);
+	const double YAtRecovery = Fish->GetActorLocation().Y;
+	for (int32 i = 0; i < 60; ++i) { Fish->SetInputDirection(FVector2D(-1.f, 0.f)); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("the held key steers again from recovery"), Fish->GetActorLocation().Y < YAtRecovery);
+	return true;
+}
+
+// F-12: a key RELEASED during the flee must not come back to life at recovery.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorRecoveryUsesCurrentInput, "Aquarium.Fish.RecoveryUsesCurrentInput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorRecoveryUsesCurrentInput::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = World->SpawnActor<AFishActor>();
+	Fish->PlaneOrigin = FVector(220.f, 0.f, 105.f);
+	Fish->bIsPlayerFish = true;
+	Fish->bPlayerControlled = true;
+	Fish->InitializeSwim();
+	Fish->SetInputDirection(FVector2D(0.f, 1.f));                    // holding UP
+	for (int32 i = 0; i < 30; ++i) { Fish->StepSwim(1.f / 60.f); }
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() + FVector(0.f, 0.f, 15.f));  // flee downward
+	// The child lets go during the flee.
+	for (int32 i = 0; i < 60; ++i) { Fish->SetInputDirection(FVector2D::ZeroVector); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("recovering"), Fish->FleeState() == aquarium::BehaviorState::Recovering);
+	const float SpeedAtRecovery = Fish->CurrentSpeed();
+	for (int32 i = 0; i < 72; ++i) { Fish->SetInputDirection(FVector2D::ZeroVector); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(FString::Printf(TEXT("coasts to a stop, no resurrected key (%.2f < %.2f)"),
+		Fish->CurrentSpeed(), SpeedAtRecovery),
+		Fish->CurrentSpeed() < SpeedAtRecovery * 0.5f);
+	return true;
+}
+
+// F-09: exactly one fish per click, and it is the frontmost one.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishClickPicksFrontmost, "Aquarium.Fish.ClickPicksFrontmostFish",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishClickPicksFrontmost::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	TestNotNull(TEXT("subsystem"), School);
+
+	// PLAN DEVIATION, see the report: the plan spawned mesh-less fish, but AsClickTarget derives
+	// its half extents from the RENDERED bounds, so a fish with no mesh has zero extents and is
+	// correctly invisible to a click. A real mesh is what makes this test exercise anything.
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Mesh)) return false;
+
+	// Three fish stacked on the same screen point at different plane depths.
+	TArray<AFishActor*> Fish;
+	for (float Depth : {700.f, 330.f, 500.f})
+	{
+		AFishActor* F = World->SpawnActor<AFishActor>();
+		F->PlaneOrigin = FVector(Depth, 0.f, 100.f);
+		F->SetMesh(Mesh);
+		F->InitializeSwim();
+		School->Register(F);
+		Fish.Add(F);
+	}
+	// A ray from the camera position straight at that point.
+	FVector Hit = FVector::ZeroVector;
+	AFishActor* Picked = School->PickFrontmostHit(FVector(0.f, 0.f, 100.f), FVector(1.f, 0.f, 0.f), Hit);
+	TestTrue(TEXT("something was hit"), Picked != nullptr);
+	// TestEqual is ambiguous for AFishActor* (plan error), so compare the pointers directly.
+	TestTrue(TEXT("the frontmost plane wins"), Picked == Fish[1]);   // depth 330
+	TestEqual(TEXT("hit point is on that plane"), static_cast<float>(Hit.X), 330.f, 0.1f);
+	return true;
+}
+
+// F-09: empty water affects nothing at all.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishClickOnEmptyWater, "Aquarium.Fish.ClickOnEmptyWaterHitsNothing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishClickOnEmptyWater::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Mesh)) return false;
+	AFishActor* F = World->SpawnActor<AFishActor>();
+	F->PlaneOrigin = FVector(400.f, 0.f, 100.f);
+	F->SetMesh(Mesh);
+	F->InitializeSwim();
+	School->Register(F);
+
+	// Sanity: the same ray aimed AT the fish does hit, so the miss below is about where the ray
+	// points and not about a target list that is empty for some other reason.
+	FVector AimedHit = FVector::ZeroVector;
+	TestTrue(TEXT("a ray aimed at the fish does hit it"),
+		School->PickFrontmostHit(FVector(0.f, 0.f, 100.f), FVector(1.f, 0.f, 0.f), AimedHit) == F);
+
+	FVector Hit = FVector::ZeroVector;
+	// 3 m above every fish: nothing to hit.
+	AFishActor* Picked = School->PickFrontmostHit(FVector(0.f, 0.f, 400.f), FVector(1.f, 0.f, 0.f), Hit);
+	TestNull(TEXT("empty water hits nothing"), Picked);
+	TestTrue(TEXT("no fish was disturbed"), F->FleeState() == aquarium::BehaviorState::Normal);
+	return true;
+}
+
+
+namespace
+{
+// A fish whose heading is known, so a click can be aimed exactly in front of or behind it.
+// Player-controlled only to pin the heading; the flee layer overrides the input either way.
+AFishActor* SpawnAimedFish(UWorld* World, int32 WarmupFrames = 120)
+{
+	AFishActor* Fish = SpawnFish(World, 11u);
+	Fish->bPlayerControlled = true;
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));   // screen-right == world +Y
+	for (int32 i = 0; i < WarmupFrames; ++i) { Fish->StepSwim(1.f / 60.f); }
+	return Fish;
+}
+aquarium::FacingParams FacingParamsOf(const AFishActor* Fish)
+{
+	aquarium::FacingParams FP;
+	FP.maxTurnRateDegPerSec = Fish->MaxFacingTurnRate;
+	FP.uprightRollRateDegPerSec = Fish->MaxFacingTurnRate;
+	FP.steepRollRateDegPerSec = Fish->SteepRollRate;
+	FP.steepBeginSin = Fish->SteepBeginSin;
+	return FP;
+}
+}
+
+// F-13: the flee flips the desired direction by up to 180 degrees in ONE frame -- the harshest
+// direction input in this game, and one no existing continuity test has ever driven. The facing
+// must still be rate limited. The limit is DERIVED from aquarium::FacingParams, never a literal.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishFacingContinuousAcrossFlee, "Aquarium.Fish.FacingIsContinuousAcrossFlee",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishFacingContinuousAcrossFlee::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	// Only 0.2 s of warm-up on purpose. A head-on click reverses the DESIRED direction in one
+	// frame, but the velocity can only turn around at accel (30 cm/s^2): from a full 40 cm/s
+	// cruise that takes 1.33 s, which is longer than the 0.8 s flee, so a cruising fish never
+	// reverses at all and this test would watch a fish swim perfectly straight. At ~6 cm/s the
+	// velocity really does pass through zero inside the flee, which is the one moment the facing
+	// frame has to turn 180 degrees, and the only case where the rate limit can be caught failing.
+	AFishActor* Fish = SpawnAimedFish(World, 12);
+
+	const float Dt = 1.f / 60.f;
+	const aquarium::FacingParams FP = FacingParamsOf(Fish);
+	// Worst case allowance for one step: full swing plus the fastest twist, both from the rules layer.
+	const float Allowed = aquarium::MaxSwingStepDeg(FP, Dt) + aquarium::MaxTwistStepDeg(1.f, FP, Dt);
+
+	// Click directly in FRONT of the fish: the flee direction is the exact reverse of its heading.
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() + FVector(0.f, 10.f, 0.f));
+	TestTrue(TEXT("the click actually started a flee"), Fish->FleeState() == aquarium::BehaviorState::Fleeing);
+	FQuat Prev = Fish->GetActorQuat();
+	float Worst = 0.f;
+	for (int32 i = 0; i < 180; ++i)
+	{
+		Fish->StepSwim(Dt);
+		const FQuat Now = Fish->GetActorQuat();
+		Worst = FMath::Max(Worst, FMath::RadiansToDegrees(Prev.AngularDistance(Now)));
+		Prev = Now;
+	}
+	// A flee that never turned the fish would pass this trivially, so pin that it did turn.
+	TestTrue(FString::Printf(TEXT("the fish really did reverse (worst step %.1f deg > 1 deg)"), Worst), Worst > 1.f);
+	TestTrue(FString::Printf(TEXT("worst per-frame facing change %.1f deg <= %.1f deg"), Worst, Allowed),
+		Worst <= Allowed + 1.f);
+	return true;
+}
+
+// F-13: "does not slide" -- no existing test checks this at all. The body must point where the
+// fish is actually travelling. The facing target IS the velocity direction, so the only sliding
+// possible is the rate-limited lag while the velocity direction swings; once the fish is moving
+// at a real speed again the body must have caught up.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishFleeDoesNotSlide, "Aquarium.Fish.FleeDoesNotSlide",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishFleeDoesNotSlide::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnAimedFish(World);
+	// A click from BELOW, i.e. a flee straight up while the fish cruises right. Deliberately not
+	// head-on: a head-on click only decelerates a cruising fish along the line it is already on,
+	// so the travel direction never changes and nothing about sliding is exercised. A 90 degree
+	// flee turns the velocity while keeping the speed high, which is exactly when a body that is
+	// pointed at the flee direction instead of at the travel direction becomes visible.
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() - FVector(0.f, 0.f, 10.f));
+	TestTrue(TEXT("the click actually started a flee"), Fish->FleeState() == aquarium::BehaviorState::Fleeing);
+
+	// Only frames where the fish is genuinely under way count. Derived from the fish's own cruise
+	// speed: while the velocity is near zero there is no travel direction to compare against, and
+	// residual drift is not "sliding" by any reading of F-13.
+	const float SpeedGate = 0.5f * Fish->MaxSpeed;
+	const FVector Start = Fish->GetActorLocation();
+	FVector Prev = Start;
+	float WorstDeg = 0.f;
+	int32 Samples = 0;
+	for (int32 i = 0; i < 180; ++i)
+	{
+		Fish->StepSwim(1.f / 60.f);
+		const FVector Now = Fish->GetActorLocation();
+		const FVector Step = Now - Prev;
+		Prev = Now;
+		if (Fish->CurrentSpeed() < SpeedGate || Step.IsNearlyZero()) { continue; }
+		const float Deg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+			static_cast<float>(FVector::DotProduct(Step.GetSafeNormal(), Fish->GetActorForwardVector())), -1.f, 1.f)));
+		WorstDeg = FMath::Max(WorstDeg, Deg);
+		++Samples;
+	}
+	TestTrue(FString::Printf(TEXT("enough moving frames to mean anything (%d)"), Samples), Samples > 120);
+	// The flee really did steer the fish off its old line, so the samples above are not just a
+	// fish swimming straight ahead.
+	const float TurnedDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+		static_cast<float>(FVector::DotProduct((Prev - Start).GetSafeNormal(), FVector(0.f, 1.f, 0.f))), -1.f, 1.f)));
+	TestTrue(FString::Printf(TEXT("the flee really changed the course (%.1f deg off the old heading)"), TurnedDeg),
+		TurnedDeg > 10.f);
+	TestTrue(FString::Printf(TEXT("worst travel-vs-forward angle %.1f deg <= 15 deg"), WorstDeg),
+		WorstDeg <= 15.f);
+	return true;
+}
+
+// F-13: "amplitude and period follow speed AND state". The flee speed burst must show in the tail.
+// The click comes from BEHIND on purpose: a head-on click reverses the desired direction, and with
+// accel 30 cm/s^2 a reversal spends the whole 0.8 s flee DECELERATING, so the speed drops. The
+// burst F-10 promises is only observable when the flee direction is not opposed to the heading.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishFleeIncreasesTailAmplitude, "Aquarium.Fish.FleeIncreasesTailAmplitude",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishFleeIncreasesTailAmplitude::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnAimedFish(World);
+	const float CruiseSpeed = Fish->CurrentSpeed();
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() - FVector(0.f, 10.f, 0.f));   // chased from behind
+	for (int32 i = 0; i < 45; ++i) { Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("still fleeing when sampled"), Fish->FleeState() == aquarium::BehaviorState::Fleeing);
+	const float FleeSpeed = Fish->CurrentSpeed();
+
+	aquarium::SwimAnimParams AP;
+	// Expectation derived from the rules layer, not from a literal amplitude.
+	const float CruiseAmp = aquarium::SwimAnimation::Amplitude(CruiseSpeed, AP);
+	const float FleeAmp = aquarium::SwimAnimation::Amplitude(FleeSpeed, AP);
+	TestTrue(FString::Printf(TEXT("flee is faster (%.1f > %.1f)"), FleeSpeed, CruiseSpeed),
+		FleeSpeed > CruiseSpeed * 1.2f);
+	TestTrue(FString::Printf(TEXT("so the tail swings wider (%.2f > %.2f)"), FleeAmp, CruiseAmp),
+		FleeAmp > CruiseAmp);
+	return true;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

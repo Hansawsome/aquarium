@@ -1,4 +1,6 @@
 #include "DiverPlayerController.h"
+
+#include "FishSchoolSubsystem.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
 #include "Components/InputComponent.h"
@@ -12,6 +14,8 @@
 #include "UnrealClient.h"
 #include "FishActor.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
 
 #include "aquarium/Steering.h"
 
@@ -67,6 +71,8 @@ void ADiverPlayerController::BeginPlay()
 	StartUiCaptureIfRequested();
 	StartFrameStatsIfRequested();
 	StartAutoInputIfRequested();
+	StartAutoClickIfRequested();
+	StartClickLogIfRequested();
 
 	// F-06: focus loss releases input and pauses the simulation; focus gain resumes it.
 	if (FSlateApplication::IsInitialized())
@@ -124,11 +130,89 @@ void ADiverPlayerController::ApplyInputToPlayerFish(float DeltaSeconds)
 	Fish->SetInputDirection(DirectionFor(ArrowKeys));
 }
 
+void ADiverPlayerController::HandleClick()
+{
+	// The HUD exit button sits on top of the scene; a click that the button is taking must not
+	// also startle whatever fish happens to be behind it. Slate handles the button itself, but
+	// under FInputModeGameAndUI the key still reaches us, so this guard is ours to make.
+	if (Hud && Hud->IsPointerOverExitButton())
+	{
+		return;
+	}
+	float X = 0.f, Y = 0.f;
+	if (!GetMousePosition(X, Y))
+	{
+		return;
+	}
+	HandleClickAt(FVector2D(X, Y));
+}
+
+bool ADiverPlayerController::HandleClickAt(const FVector2D& ViewportPos)
+{
+	// The ONE place the engine's projection maths is used. Writing a closed-form screen -> plane
+	// formula here would mean copying the FOV, aspect and near plane into a second place, which
+	// is the duplicated-rule trap that hid the prop lane bug until M4b.
+	FVector WorldOrigin = FVector::ZeroVector;
+	FVector WorldDir = FVector::ZeroVector;
+	if (!DeprojectScreenPositionToWorld(static_cast<float>(ViewportPos.X), static_cast<float>(ViewportPos.Y),
+	                                    WorldOrigin, WorldDir))
+	{
+		return false;
+	}
+	const bool bHandled = HandleClickRay(WorldOrigin, WorldDir);
+#if !UE_BUILD_SHIPPING
+	if (!ClickLogPath.IsEmpty())
+	{
+		FVector2D Size(1.f, 1.f);
+		if (GEngine && GEngine->GameViewport) { GEngine->GameViewport->GetViewportSize(Size); }
+		// Columns only: index, time, where on screen, what was hit. Never a nickname (P-03).
+		ClickLogRows.Add(FString::Printf(TEXT("%d,%.3f,%.4f,%.4f,%.1f,%d,%s"),
+			ClickLogRows.Num() - 1, AutoClickElapsed,
+			ViewportPos.X / FMath::Max(Size.X, 1.f), ViewportPos.Y / FMath::Max(Size.Y, 1.f),
+			LastClickPlaneX, bHandled ? 1 : 0, *LastClickState));
+	}
+#endif
+	return bHandled;
+}
+
+bool ADiverPlayerController::HandleClickRay(const FVector& RayOrigin, const FVector& RayDir)
+{
+	LastClickPlaneX = 0.f;
+	LastClickState = TEXT("None");
+	AAquariumGameMode* GM = GameMode();
+	if (GM == nullptr || !GM->HasActiveSession())
+	{
+		return false;   // the entry screen is up; clicking the nickname box startles nobody
+	}
+	UWorld* W = GetWorld();
+	UFishSchoolSubsystem* School = W ? W->GetSubsystem<UFishSchoolSubsystem>() : nullptr;
+	if (School == nullptr)
+	{
+		return false;
+	}
+	FVector Hit = FVector::ZeroVector;
+	AFishActor* Fish = School->PickFrontmostHit(RayOrigin, RayDir, Hit);
+	if (Fish == nullptr)
+	{
+		return false;   // F-09: empty water affects nothing
+	}
+	LastClickPlaneX = static_cast<float>(Hit.X);
+	switch (Fish->FleeState())
+	{
+	case aquarium::BehaviorState::Fleeing:    LastClickState = TEXT("Fleeing"); break;
+	case aquarium::BehaviorState::Recovering: LastClickState = TEXT("Recovering"); break;
+	default:                                  LastClickState = TEXT("Normal"); break;
+	}
+	Fish->ApplyFleeFrom(Hit);   // exactly one fish per click
+	return true;
+}
+
 void ADiverPlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 #if !UE_BUILD_SHIPPING
 	AdvanceAutoInput(DeltaSeconds);
+	AdvanceAutoClick(DeltaSeconds);
 #endif
 	ApplyInputToPlayerFish(DeltaSeconds);
 #if !UE_BUILD_SHIPPING
@@ -162,6 +246,7 @@ void ADiverPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 #if !UE_BUILD_SHIPPING
 	WriteFrameStats();
+	WriteClickLog();
 #endif
 	Super::EndPlay(EndPlayReason);
 }
@@ -183,6 +268,10 @@ void ADiverPlayerController::SetupInputComponent()
 		InputComponent->BindKey(EKeys::Left, IE_Released, this, &ADiverPlayerController::ReleaseLeft);
 		InputComponent->BindKey(EKeys::Right, IE_Pressed, this, &ADiverPlayerController::PressRight);
 		InputComponent->BindKey(EKeys::Right, IE_Released, this, &ADiverPlayerController::ReleaseRight);
+		// F-09. IE_Pressed ONLY. macOS delivers BOTH IE_Pressed and IE_DoubleClick for the second
+		// click of a fast double click, so binding the double click as well would make one
+		// physical click of a mashing child count twice.
+		InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ADiverPlayerController::HandleClick);
 	}
 }
 
@@ -541,5 +630,159 @@ void ADiverPlayerController::AdvanceAutoInput(float DeltaSeconds)
 		Cursor -= Step.Duration;
 	}
 	ArrowKeys = AutoInputSteps.Last().Keys;
+#endif
+}
+
+bool ADiverPlayerController::ParseAutoClick(const TCHAR* CmdLine, FString& OutPattern)
+{
+	OutPattern.Reset();
+	// bShouldStopOnSeparator=false so an unquoted comma-separated pattern survives intact,
+	// exactly as ParseAutoInput does.
+	if (!CmdLine || !FParse::Value(CmdLine, TEXT("-AquariumAutoClick="), OutPattern, /*bShouldStopOnSeparator*/ false))
+	{
+		return false;
+	}
+	OutPattern.TrimStartAndEndInline();
+	return !OutPattern.IsEmpty();
+}
+
+TArray<ADiverPlayerController::FAutoClick> ADiverPlayerController::BuildAutoClicks(const FString& Pattern)
+{
+	TArray<FAutoClick> Clicks;
+	TArray<FString> Tokens;
+	Pattern.ParseIntoArray(Tokens, TEXT(","), /*CullEmpty*/ true);
+	for (FString Token : Tokens)
+	{
+		Token.TrimStartAndEndInline();
+		if (Token.IsEmpty())
+		{
+			continue;
+		}
+		FString TimePart, CoordPart, XPart, YPart;
+		const bool bSplitAt = Token.Split(TEXT("@"), &TimePart, &CoordPart);
+		const bool bSplitX = bSplitAt && CoordPart.Split(TEXT("x"), &XPart, &YPart);
+		if (!bSplitX)
+		{
+			// The token is dev test data, so echoing it is safe; it never carries a nickname.
+			UE_LOG(LogTemp, Warning, TEXT("AquariumAutoClick: bad token '%s'; entry ignored"), *Token);
+			continue;
+		}
+		TimePart.TrimStartAndEndInline();
+		XPart.TrimStartAndEndInline();
+		YPart.TrimStartAndEndInline();
+		// IsNumeric() also rejects a second 'x' ("0.5x0.5"), so "4@0.5x0.5x0.5" is dropped here.
+		if (!TimePart.IsNumeric() || !XPart.IsNumeric() || !YPart.IsNumeric())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("AquariumAutoClick: bad token '%s'; entry ignored"), *Token);
+			continue;
+		}
+		const float T = FCString::Atof(*TimePart);
+		const float Nx = FCString::Atof(*XPart);
+		const float Ny = FCString::Atof(*YPart);
+		if (!(T > 0.f) || Nx < 0.f || Nx > 1.f || Ny < 0.f || Ny > 1.f)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("AquariumAutoClick: coords out of range in '%s'; entry ignored"), *Token);
+			continue;
+		}
+		FAutoClick C;
+		C.TimeSeconds = T;
+		C.Normalized = FVector2D(Nx, Ny);
+		Clicks.Add(C);
+	}
+	// Fire in time order whatever order they were written in.
+	Clicks.Sort([](const FAutoClick& A, const FAutoClick& B) { return A.TimeSeconds < B.TimeSeconds; });
+	return Clicks;
+}
+
+void ADiverPlayerController::StartAutoClickIfRequested()
+{
+#if !UE_BUILD_SHIPPING
+	AutoClicks.Reset();
+	NextAutoClick = 0;
+	AutoClickElapsed = 0.f;
+	FString Pattern;
+	if (!ParseAutoClick(FCommandLine::Get(), Pattern))
+	{
+		return;
+	}
+	AutoClicks = BuildAutoClicks(Pattern);
+	// ALWAYS logged, even for 0: a harness must be able to assert the armed count rather than
+	// discovering after the fact that its whole script was dropped by the parser.
+	UE_LOG(LogTemp, Warning, TEXT("AquariumAutoClick: armed %d clicks"), AutoClicks.Num());
+#endif
+}
+
+void ADiverPlayerController::AdvanceAutoClick(float DeltaSeconds)
+{
+#if !UE_BUILD_SHIPPING
+	if (NextAutoClick >= AutoClicks.Num())
+	{
+		return;
+	}
+	AutoClickElapsed += DeltaSeconds;
+	FVector2D ViewportSize = FVector2D::ZeroVector;
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->GetViewportSize(ViewportSize);
+	}
+	if (ViewportSize.X <= 0.f || ViewportSize.Y <= 0.f)
+	{
+		return;   // no viewport yet (or -nullrhi): nothing to aim at
+	}
+	while (NextAutoClick < AutoClicks.Num() && AutoClicks[NextAutoClick].TimeSeconds <= AutoClickElapsed)
+	{
+		const FAutoClick& C = AutoClicks[NextAutoClick++];
+		// Same entry point as a real mouse click: one code path, so the capture verifies the
+		// thing the child will actually use, deprojection included.
+		HandleClickAt(FVector2D(C.Normalized.X * ViewportSize.X, C.Normalized.Y * ViewportSize.Y));
+	}
+#endif
+}
+
+bool ADiverPlayerController::ParseClickLogPath(const TCHAR* CmdLine, FString& OutPath)
+{
+	OutPath.Reset();
+	if (!CmdLine || !FParse::Value(CmdLine, TEXT("-AquariumClickLog="), OutPath))
+	{
+		return false;
+	}
+	OutPath.TrimStartAndEndInline();
+	return !OutPath.IsEmpty();
+}
+
+void ADiverPlayerController::StartClickLogIfRequested()
+{
+#if !UE_BUILD_SHIPPING
+	FString Path;
+	if (!ParseClickLogPath(FCommandLine::Get(), Path))
+	{
+		return;
+	}
+	ClickLogPath = Path;
+	ClickLogRows.Reset();
+	ClickLogRows.Add(TEXT("index,time_s,ndc_x,ndc_y,hit_plane_x,hit,state_before"));
+#endif
+}
+
+void ADiverPlayerController::WriteClickLog()
+{
+#if !UE_BUILD_SHIPPING
+	if (ClickLogPath.IsEmpty())
+	{
+		return;
+	}
+	FString Csv;
+	for (const FString& Row : ClickLogRows) { Csv += Row + TEXT("\n"); }
+	if (FFileHelper::SaveStringToFile(Csv, *ClickLogPath))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AquariumClickLog: wrote %d clicks to %s"),
+			ClickLogRows.Num() - 1, *ClickLogPath);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AquariumClickLog: cannot write %s"), *ClickLogPath);
+	}
+	ClickLogPath.Reset();
+	ClickLogRows.Empty();
 #endif
 }

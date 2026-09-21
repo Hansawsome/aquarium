@@ -146,11 +146,17 @@ scripts/render_m4b_compare.sh   # CLOSEUP_OK / VIDEO_OK / SCENE_OK / COMPARE_OK 
 scripts/render_m4c_compare.sh   # VIDEO_OK / VERTICAL_OK / SCENE_OK / COMPARE_OK +
                                 # MATERIAL_COMPILE_FAILURES=0 AUTOINPUT_UNKNOWN=0 AUTOINPUT_BAD_DURATION=0 확인
 
-# 10. M4c 항목별 성능 분해 (기본 → 무리 끔 → 소품 회피 끔 → 둘 다 끔)
+# 10. M5 검토 산출물: 클릭 도망 클립(30초) + 클릭 로그 CSV + 장면 스틸 + M4c 대비 비교
+scripts/render_m5_click.sh      # GUARDS_OK / VIDEO_OK / STILL_OK / COMPARE_OK +
+                                # ARMED=7 CLICK_BAD=0 CLICK_RANGE=0 INPUT_UNKNOWN=0 INPUT_BAD=0
+                                # MATERIAL_COMPILE_FAILURES=0 CLICK_ROWS=7, 적중/비적중 혼재 확인
+
+# 11. M4c/M5 항목별 성능 분해 (기본 → 무리 끔 → 소품 회피 끔 → 둘 다 끔 → 도망 끔)
 scripts/measure_m2b_perf.sh
 EXTRA_ARGS="-AquariumNoSchooling" scripts/measure_m2b_perf.sh
 EXTRA_ARGS="-AquariumNoPropAvoid" scripts/measure_m2b_perf.sh
 EXTRA_ARGS="-AquariumNoSchooling -AquariumNoPropAvoid" scripts/measure_m2b_perf.sh
+EXTRA_ARGS="-AquariumNoFlee" scripts/measure_m2b_perf.sh
 ```
 
 **2단계 비고 (M4a 이후 물고기 임포트는 종당 세 장).** 물고기 스크립트는 종마다 2048² 세 장
@@ -237,7 +243,37 @@ M4b를 M4b와 비교한 사고가 있었다).
   모두 0인지 단언한다(`AUTOINPUT_UNKNOWN=0 AUTOINPUT_BAD_DURATION=0`). 새 대본을 쓸 때는
   기억이 아니라 `ADiverPlayerController::BuildAutoInputSteps`를 보고 쓴다.
 
-**10단계 비고 — `EXTRA_ARGS`(M4c에서 추가).** `scripts/measure_m2b_perf.sh`에는 원래 엔진 명령줄에
+**`-AquariumAutoClick` 토큰 문법 — 반드시 이 형식이어야 한다.** 값은 쉼표로 나뉜 토큰 목록이고,
+각 토큰은 **`<초>@<nx>x<ny>`** 하나다.
+
+- 구분자는 **`@` 하나와 `x` 하나**뿐이다. **콜론 형식은 없다.** `4.0:0.5x0.5`는 버려진다.
+- `<초>`: 세션 시작 이후의 양수 초. 0 이하는 버려진다.
+- `<nx>`, `<ny>`: 뷰포트 **너비·높이에 대한 비율 0..1**. 픽셀이 아니다. 범위를 벗어나면 버려진다.
+- 토큰은 쓴 순서와 무관하게 **시각 순으로 발사**된다.
+- 예약 클릭도 실제 마우스와 **같은 `HandleClickAt`** 을 통과한다. 그래서 캡처가 검증하는 경로가
+  아이가 실제로 쓰는 경로다.
+- **파서는 알아볼 수 없는 토큰에 대해 경고만 찍고 조용히 버린다.** 경고 문자열은 정확히 두 개다
+  (`AquariumAutoClick: bad token '…'; entry ignored` /
+  `AquariumAutoClick: coords out of range in '…'; entry ignored`).
+  그래서 **플래그가 있으면 클릭이 0개여도 언제나** `AquariumAutoClick: armed %d clicks`를 찍는다.
+  하네스는 경고 건수 0과 `armed N`이 요청한 개수와 같은지를 **반드시 단언해야 한다** —
+  `-AquariumAutoInput`과 똑같이, 오타 하나가 "클릭이 하나도 발사되지 않은 그럴듯한 클립"을 만든다.
+  새 대본은 기억이 아니라 `ADiverPlayerController::BuildAutoClicks`를 보고 쓴다.
+
+**`-AquariumClickLog=<csv 절대경로>`.** 클릭 시도마다 한 행을 남기고 EndPlay에서
+`AquariumClickLog: wrote %d clicks to %s`를 찍는다. 열은
+`index,time_s,ndc_x,ndc_y,hit_plane_x,hit,state_before`이며 **별명은 어느 열에도 들어가지 않는다**(P-03).
+`-nullrhi`에는 게임 뷰포트가 없어 `DeprojectScreenPositionToWorld`가 돌지 않으므로 Automation 테스트는
+`HandleClickRay`에서 시작한다. **이 CSV가 역투영 경로의 유일한 검증 수단이다.** 그래서
+`render_m5_click.sh`는 행 수뿐 아니라 **적중과 비적중이 섞여 있는지**까지 단언한다 — 전부 비적중이면
+역투영이 망가진 채로도 클립은 멀쩡해 보이고, 전부 적중이면 타원 판정이 너무 후하다는 뜻이다.
+**물고기는 작고 움직이는 표적이라, 조준점은 기억으로 정하면 안 된다**: M5에서 계획서가 적어 둔
+좌표 일곱 개는 전부 빈 물을 맞혔고(7발 0적중) 단언이 그것을 잡아냈다. 실제 좌표는 클릭을 격자로
+뿌리는 프로브 캡처를 한 번 돌려 `hit_plane_x`가 실제 평면 값을 돌려준 점만 골라 정했다.
+
+**`-AquariumNoFlee`.** 클릭 처리와 도망 층을 통째로 끈다(성능 귀속용).
+
+**11단계 비고 — `EXTRA_ARGS`(M4c에서 추가).** `scripts/measure_m2b_perf.sh`에는 원래 엔진 명령줄에
 인자를 덧붙일 수단이 없었다. M4c에서 `EXTRA_ARGS`를 추가해 같은 실행 시간·같은 워밍업·같은 스크립트로
 항목별 토글을 측정할 수 있게 했다. 개발 전용 토글은 두 개다.
 
@@ -249,7 +285,7 @@ M4b를 M4b와 비교한 사고가 있었다).
 
 아무것도 주지 않은 상태가 출하 설정이며, 커밋된 레벨과 보고 수치는 언제나 그 상태다.
 이 스크립트는 산출물 이름을 항상 `<날짜>-m2b-*`로 쓰므로 실행 후 CSV를 `<날짜>-m4c-frametimes.csv`로
-옮긴다. **실행 간 노이즈 바닥은 약 1.3 fps**이고, M4c 측정에서는 세 토글 차이가 전부 그 아래인 데다
+옮긴다(M5는 `<날짜>-m5-frametimes.csv`). **실행 간 노이즈 바닥은 약 1.3 fps**이고, M4c 측정에서는 세 토글 차이가 전부 그 아래인 데다
 부호까지 반대여서 **점추정이 아니라 상한으로만** 읽었다. 결과는
 [`docs/reviews/2026-09-21-m4c-perf.md`](reviews/2026-09-21-m4c-perf.md).
 

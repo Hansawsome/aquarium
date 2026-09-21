@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "aquarium/Boids.h"
+#include "aquarium/Flee.h"
 #include "aquarium/Obstacles.h"
 
 #include "FishSchoolSubsystem.generated.h"
@@ -30,6 +31,15 @@ public:
 
 	// Every registered fish in the shared swim frame. Rebuilt at most once per frame.
 	const std::vector<aquarium::BoidNeighbor>& Neighbors();
+
+	// F-09: the frontmost registered fish the ray passes through, or nullptr for empty water.
+	// The picking rule itself lives in aquarium::PickFrontmostHit; this only supplies the list,
+	// exactly as Neighbors() supplies the boid list. OutHit is the world-space point on that
+	// fish's plane, which the caller hands straight to AFishActor::ApplyFleeFrom.
+	AFishActor* PickFrontmostHit(const FVector& RayOrigin, const FVector& RayDir, FVector& OutHit);
+
+	// Dev-only toggle: skips click handling and the flee layer entirely (performance attribution).
+	bool bFleeEnabled = true;
 
 	// Dev-only per-item toggles for the performance attribution run. Public and plain bools so a
 	// test can set them directly without going through the command line.
