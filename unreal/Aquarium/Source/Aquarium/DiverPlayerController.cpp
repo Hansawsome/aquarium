@@ -333,6 +333,8 @@ void ADiverPlayerController::SetupInputComponent()
 		// click of a fast double click, so binding the double click as well would make one
 		// physical click of a mashing child count twice.
 		InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ADiverPlayerController::HandleClick);
+		// 돌진. 아이의 손은 빠르므로 연타가 기본 사용법이고, DashDrive는 거절하지 않는다.
+		InputComponent->BindKey(EKeys::SpaceBar, IE_Pressed, this, &ADiverPlayerController::HandleDashPressed);
 	}
 }
 
@@ -433,6 +435,17 @@ void ADiverPlayerController::RequestExit()
 		}
 		GM->EndSession();
 		ShowEntry();
+	}
+}
+
+void ADiverPlayerController::HandleDashPressed()
+{
+	if (AAquariumGameMode* GM = GameMode())
+	{
+		if (AFishActor* Fish = GM->PlayerFish())
+		{
+			Fish->PressDash();
+		}
 	}
 }
 

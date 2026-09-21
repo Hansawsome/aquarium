@@ -6,6 +6,9 @@
 
 #include "aquarium/Boids.h"
 #include "aquarium/Bounds.h"
+#include "aquarium/Catch.h"
+#include "aquarium/Dash.h"
+#include "aquarium/Evade.h"
 #include "aquarium/Facing.h"
 #include "aquarium/Flee.h"
 #include "aquarium/Heading.h"
@@ -96,6 +99,23 @@ public:
 	// no per-species radius table is copied into C++.
 	aquarium::ClickTarget AsClickTarget() const;
 
+	// 돌진 한 번. **거절하지 않는다**(aquarium::DashDrive에 실패를 표현할 반환값이 없다).
+	void PressDash();
+	int32 DashPressCount() const { return DashPressCountValue; }
+	// 공유 유영 프레임에서 본 코끝. 몸 중심이 아니라 여기가 들이받는 점이다.
+	aquarium::Vec2 NosePoint() const;
+	// 공유 유영 프레임에서의 속도. CurrentSpeed()는 크기만 주므로 방향이 필요하다.
+	aquarium::Vec2 SwimVelocity() const { return Motion.velocity; }
+	// 이 물고기를 들이받히는 쪽으로 본 것. AsClickTarget과 같은 렌더 바운드에서 파생한다.
+	aquarium::RamTarget AsRamTarget() const;
+	// 다가오는 추격자를 눈치챘다. 화면 좌표는 호출자(UCatchSubsystem)가 계산해 넘긴다.
+	void NoticeApproach(const aquarium::Vec2& ApproachDirShared);
+	int32 EvadeNoticeCount() const { return EvadeValue.NoticeCount(); }
+	// 도장이 박혔는지. 세션 리셋으로만 풀린다.
+	bool IsStamped() const { return bStamped; }
+	// 장부의 열쇠. Seed는 build_reef_m1.py가 물고기마다 다르게 준다.
+	int32 FishId() const { return static_cast<int32>(Seed); }
+
 	// Sets the desired swim direction in swim-plane coordinates (X = screen right, Y = screen up).
 	// Stored normalized, so a longer input vector can never exceed the normal swim speed. Only read
 	// when bPlayerControlled is true; a zero vector means "no input", and the fish coasts to a stop.
@@ -135,6 +155,13 @@ private:
 	aquarium::BoidsParams BoidsParamsValue;
 	aquarium::FleeStateMachine Flee;
 	aquarium::FleeParams FleeParamsValue;
+	aquarium::DashDrive Dash;
+	aquarium::DashParams DashParamsValue;
+	aquarium::EvadeBehavior EvadeValue;
+	aquarium::EvadeParams EvadeParamsValue;
+	aquarium::CatchParams CatchParamsValue;
+	int32 DashPressCountValue = 0;
+	bool bStamped = false;
 	aquarium::ReactionStyle StartleStyleValue = aquarium::ReactionStyle::Dart;
 	aquarium::StartleShape StartleShapeValue;
 	float StartleSpinDeg = 0.f;     // 누적 시각 회전(도)

@@ -81,6 +81,10 @@ void AFishActor::InitializeSwim()
 		}
 	}
 	Flee = aquarium::FleeStateMachine();
+	Dash = aquarium::DashDrive();
+	EvadeValue = aquarium::EvadeBehavior();
+	DashPressCountValue = 0;
+	bStamped = false;
 	Wander.Emplace(Seed, Area, /*arriveRadius*/ 15.f, /*targetLifetime*/ 8.f);
 	SwimPhase = 0.f;
 	InputDirection = {0.f, 0.f};
@@ -133,7 +137,10 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	// 여전히 규칙 계층 한 곳에만 있다.
 	const float StyleScale = (Flee.State() == aquarium::BehaviorState::Normal)
 		? 1.f : (StartleShapeValue.speedScale / FleeParamsValue.fleeSpeedScale);
-	MotionParamsValue.maxSpeed = MaxSpeed * Flee.SpeedScale(FleeParamsValue) * StyleScale;
+	// 돌진은 기존 배율과 **같은 자리에서** 곱해진다. 그래야 속도 상수가 여전히
+	// 규칙 계층 한 곳에만 있다.
+	Dash.Step(DeltaSeconds, DashParamsValue);
+	MotionParamsValue.maxSpeed = MaxSpeed * Flee.SpeedScale(FleeParamsValue) * StyleScale * Dash.SpeedScale(DashParamsValue);
 	// Schooling applies to background fish only. The player's fish is never a boid: arrow keys
 	// must map to motion with nothing mixed in, or the child gets "I pressed left and it went
 	// somewhere else" (F-05/F-07). The other direction -- background fish reacting to the player
@@ -458,6 +465,42 @@ void AFishActor::ApplyFleeFrom(const FVector& WorldTouch)
 float AFishActor::StartleSpinDegPerSec() const
 {
 	return Flee.State() == aquarium::BehaviorState::Fleeing ? StartleShapeValue.spinDegPerSec : 0.f;
+}
+
+void AFishActor::PressDash()
+{
+	// 내 물고기만 돌진한다. 배경 물고기에 걸리면 바다 전체가 튀어 나간다.
+	if (!bPlayerControlled && !bIsPlayerFish) return;
+	Dash.Press(DashParamsValue);
+	++DashPressCountValue;
+}
+
+aquarium::Vec2 AFishActor::NosePoint() const
+{
+	const aquarium::ClickTarget T = AsClickTarget();
+	// 진행 방향이 0이면(정지) 몸 중심 그대로. NosePoint가 0으로 나누지 않는다.
+	return aquarium::NosePoint(T.center, Motion.velocity, T.halfWidth, CatchParamsValue);
+}
+
+aquarium::RamTarget AFishActor::AsRamTarget() const
+{
+	const aquarium::ClickTarget T = AsClickTarget();
+	aquarium::RamTarget R;
+	R.depth = T.depth;
+	R.center = T.center;
+	R.halfWidth = T.halfWidth;
+	R.halfHeight = T.halfHeight;
+	R.velocity = Motion.velocity;
+	R.alreadyStamped = bStamped;
+	return R;
+}
+
+void AFishActor::NoticeApproach(const aquarium::Vec2& ApproachDirShared)
+{
+	// 내 물고기는 자기 자신을 피하지 않는다.
+	if (bPlayerControlled || bIsPlayerFish) return;
+	EvadeValue.Notice(ApproachDirShared, Motion.velocity,
+		Seed + static_cast<uint32>(EvadeValue.NoticeCount()), EvadeParamsValue);
 }
 
 aquarium::ClickTarget AFishActor::AsClickTarget() const

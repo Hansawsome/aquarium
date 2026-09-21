@@ -84,6 +84,10 @@ public:
 	// automation can only start at HandleClickRay.
 	static bool ParseClickLogPath(const TCHAR* CmdLine, FString& OutPath);
 
+	// 스페이스. 공개인 이유는 클릭과 같다: -nullrhi에는 실제 키 이벤트가 없어
+	// 자동화가 여기서 시작해야 한다.
+	void HandleDashPressed();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
