@@ -9,6 +9,9 @@ public class Aquarium : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "UMG", "Slate", "SlateCore" });
 
+		// Tests/PropMaterialsCompileTest.cpp walks /Game/Props and /Game/Env via the asset registry.
+		PrivateDependencyModuleNames.AddRange(new string[] { "AssetRegistry", "RHI" });  // RHI: GMaxRHIShaderPlatform
+
 		// Engine-independent rules layer lives at the repo root; compile the same sources here (no copies).
 		string RepoRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", ".."));
 		string RulesDir = Path.Combine(RepoRoot, "rules");
