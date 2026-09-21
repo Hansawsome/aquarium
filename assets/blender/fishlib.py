@@ -527,18 +527,27 @@ def add_membrane_fin(name, outline, thickness_root, thickness_edge, rays=0, ray_
     return ob
 
 
-def scale_pattern(nt, cell_size, sharpness=3.0):
+def scale_pattern(nt, cell_size, sharpness=1.0):
     """Voronoi-based scale pattern. Returns (height_socket, roughness_socket) in 0..1: feed the
-    height into a Bump node so it lands in the normal bake, the roughness into Principled."""
+    height into a Bump node so it lands in the normal bake, the roughness into Principled.
+
+    `sharpness` is the border contrast: 1.0 is a linear dome-to-groove ramp (soft ridges), higher
+    values push the plateau outward and leave a narrow, hard-edged crack. It was 3.0 through the
+    first M4a bake, which together with a bump strength of 0.8 read as crazed ceramic glaze rather
+    than scales."""
     tex = nt.nodes.new("ShaderNodeTexVoronoi")
     tex.voronoi_dimensions = '3D'
     tex.feature = 'DISTANCE_TO_EDGE'
     tex.inputs["Scale"].default_value = 1.0 / max(1e-4, cell_size)
+    # Cells only need enough jitter to avoid a visible grid; full randomness makes them read as
+    # irregular cracked plates instead of rows of scales.
+    if "Randomness" in tex.inputs:
+        tex.inputs["Randomness"].default_value = 0.55
     # Distance to edge is 0 on the scale border and grows toward the middle: ramp it so each
-    # cell domes up and the borders cut in as grooves.
+    # cell domes up and the borders sink in as soft grooves.
     dome = nt.nodes.new("ShaderNodeMapRange")
     dome.inputs["From Min"].default_value = 0.0
-    dome.inputs["From Max"].default_value = 0.35
+    dome.inputs["From Max"].default_value = 0.30
     dome.clamp = True
     nt.links.new(tex.outputs["Distance"], dome.inputs["Value"])
     shape = nt.nodes.new("ShaderNodeMath"); shape.operation = 'POWER'
@@ -846,7 +855,7 @@ def paint_eye(nt, base, centre, radius, sclera=(0.9, 0.9, 0.88, 1), iris=(0.12, 
     return col
 
 
-def scale_pattern_world(nt, cell_size, sharpness=3.0):
+def scale_pattern_world(nt, cell_size, sharpness=1.0):
     """scale_pattern driven by world position, so `cell_size` really is centimetres.
 
     A Voronoi node with an unconnected Vector input samples Generated coordinates -- 0..1 across

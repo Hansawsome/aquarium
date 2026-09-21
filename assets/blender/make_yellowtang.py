@@ -19,7 +19,7 @@ EXPORT = os.path.join(ROOT, "export")
 LENGTH = 14.0            # nose to caudal peduncle; the caudal fin adds ~6 cm
 HALF = LENGTH / 2.0
 SPINE = 6
-SCALE_CELL = 0.58
+SCALE_CELL = 0.26
 
 # Rounder disc than the blue tang, and the snout is drawn out (a slow rise near t=0).
 PROFILE = F.hump(0.38, 5.8, 0.15, rise=1.0)
@@ -72,8 +72,8 @@ def build_nodes(nt, bsdf, c):
     col = F.paint_eye(nt, col, (EYE_X, EYE_Z), EYE_R)
     nt.links.new(col, bsdf.inputs["Base Color"])
     height, rough = F.scale_pattern_world(nt, SCALE_CELL)
-    bump = nt.nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 0.8
-    bump.inputs["Distance"].default_value = 0.14
+    bump = nt.nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 0.22
+    bump.inputs["Distance"].default_value = 0.04
     nt.links.new(height, bump.inputs["Height"])
     nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     rmap = nt.nodes.new("ShaderNodeMapRange")
