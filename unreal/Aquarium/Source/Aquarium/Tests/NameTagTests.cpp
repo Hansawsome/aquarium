@@ -1,5 +1,5 @@
 #include "Misc/AutomationTest.h"
-#if WITH_DEV_AUTOMATION_TESTS
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
 #include "Tests/AutomationEditorCommon.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -134,4 +134,4 @@ bool FUiFontIsKorean::RunTest(const FString&)
 	AddInfo(TEXT("glyph check ran"));
 	return true;
 }
-#endif
+#endif // WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
