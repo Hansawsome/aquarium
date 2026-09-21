@@ -9,3 +9,6 @@ unreal/**/*.xcworkspace/
 .DS_Store
 __pycache__/
 docs/reviews/*-frametimes.csv
+
+# Cook/packaging output written into the project tree by BuildCookRun.
+unreal/Aquarium/Build/Mac/FileOpenOrder/
