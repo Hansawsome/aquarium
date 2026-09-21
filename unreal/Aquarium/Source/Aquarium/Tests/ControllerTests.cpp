@@ -183,11 +183,19 @@ bool FControllerRepeatedClicks::RunTest(const FString&)
 	const bool bMovingRight = A->GetActorLocation().Y > FirstDirProbe.Y;
 	TestTrue(TEXT("first flee goes right"), bMovingRight);
 
-	// Re-click A from the OTHER side while still fleeing: must be IGNORED.
+	// Re-click A from the OTHER side while still fleeing. **M7 사양 변경**: M5의 F-11은
+	// 이것을 무시했지만 시나리오 장면 2 요구사항 4가 연타를 기본 사용법으로 못 박았다.
+	// 이제 무시하지 않고 다시 겨눈다 -- 속도가 실제로 왼쪽으로 돌아서야 한다.
 	A->ApplyFleeFrom(A->GetActorLocation() + FVector(0.f, 20.f, 0.f));
-	const double YBefore = A->GetActorLocation().Y;
-	for (int32 i = 0; i < 12; ++i) { A->StepSwim(1.f / 60.f); }
-	TestTrue(TEXT("mid-flee re-click is ignored: still going right"), A->GetActorLocation().Y > YBefore);
+	const double YReaim = A->GetActorLocation().Y;
+	A->StepSwim(1.f / 60.f);
+	const double VJustAfter = A->GetActorLocation().Y - YReaim;
+	for (int32 i = 0; i < 30; ++i) { A->StepSwim(1.f / 60.f); }
+	const double YLate = A->GetActorLocation().Y;
+	A->StepSwim(1.f / 60.f);
+	const double VLate = A->GetActorLocation().Y - YLate;
+	TestTrue(FString::Printf(TEXT("mid-flee re-click re-aims (%.4f -> %.4f cm/frame)"), VJustAfter, VLate),
+		VLate < VJustAfter);
 
 	// Click B while A is fleeing: independent.
 	TestTrue(TEXT("B untouched so far"), B->FleeState() == aquarium::BehaviorState::Normal);

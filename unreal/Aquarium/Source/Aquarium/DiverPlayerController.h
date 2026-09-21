@@ -122,6 +122,8 @@ private:
 	bool HandleClickAt(const FVector2D& ViewportPos);
 	void StartAutoInputIfRequested();
 	AAquariumGameMode* GameMode() const;
+	// 그 깊이에서 기포가 사라지는 월드 Z. 화면 위 끝에서 파생한다.
+	float BubbleTopZAt(float DepthCm);
 	void StartAutoReplayIfRequested();
 	void StartUiCaptureIfRequested();
 	void ApplyAssignmentSeedIfRequested();

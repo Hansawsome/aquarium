@@ -846,7 +846,9 @@ bool FFishActorBackgroundResumesWander::RunTest(const FString&)
 	return true;
 }
 
-// F-12: while fleeing, the flee beats the arrow keys; from recovery the CURRENT key applies.
+// **M7 사양 변경**: 이 테스트는 M5까지 "도망이 방향키를 이긴다(F-12)"를 단언했다.
+// 시나리오 결정표가 "내 물고기를 클릭해도 도망가지 않는다. 조종권을 한 순간도 잃지
+// 않는다"로 뒤집었으므로 지우지 않고 뒤집어 둔다 -- 이제 이긴 쪽은 방향키다.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorFleeBeatsArrowKeys, "Aquarium.Fish.FleeBeatsArrowKeys",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFishActorFleeBeatsArrowKeys::RunTest(const FString&)
@@ -857,12 +859,6 @@ bool FFishActorFleeBeatsArrowKeys::RunTest(const FString&)
 	Fish->bIsPlayerFish = true;
 	Fish->bPlayerControlled = true;
 	Fish->InitializeSwim();
-	// A control fish holding exactly the same key and never clicked. PLAN DEVIATION, see the
-	// report: the plan asserted the clicked fish ends up RIGHT of where it was when clicked, which
-	// no amount of correct wiring can produce. The flee is head-on to a held key here, and
-	// aquarium::StepMotion turns the velocity at accel = 30 cm/s^2, so reversing a 40 cm/s leftward
-	// velocity needs 1.33 s while the whole flee lasts 0.8 s. "The flee beats the key" is therefore
-	// measured the only way physics allows: against a fish holding the SAME key with no click.
 	AFishActor* Control = World->SpawnActor<AFishActor>();
 	Control->PlaneOrigin = FVector(220.f, 0.f, 105.f);
 	Control->bIsPlayerFish = true;
@@ -879,29 +875,27 @@ bool FFishActorFleeBeatsArrowKeys::RunTest(const FString&)
 	TestEqual(TEXT("the two fish are in lockstep before the click"),
 		Fish->GetActorLocation().Y, Control->GetActorLocation().Y, 1e-3);
 
-	// The child clicks their OWN fish, on its left side, so the flee wants to go RIGHT.
+	// The child clicks their OWN fish, on its left side. M5까지는 여기서 오른쪽으로
+	// 튕겨 나갔다. 이제는 아무 일도 없다 -- 방향키가 계속 이긴다.
 	Fish->ApplyFleeFrom(Fish->GetActorLocation() - FVector(0.f, 15.f, 0.f));
 	for (int32 i = 0; i < 48; ++i)
 	{
-		Fish->SetInputDirection(FVector2D(-1.f, 0.f));   // still held, as the controller would
+		Fish->SetInputDirection(FVector2D(-1.f, 0.f));
 		Control->SetInputDirection(FVector2D(-1.f, 0.f));
 		Fish->StepSwim(1.f / 60.f);
 		Control->StepSwim(1.f / 60.f);
 	}
-	TestTrue(FString::Printf(TEXT("flee wins over the held key (%.2f right of the unclicked control %.2f)"),
-		Fish->GetActorLocation().Y, Control->GetActorLocation().Y),
-		Fish->GetActorLocation().Y > Control->GetActorLocation().Y + 1.f);
-
-	// Run to the end of the flee, then keep holding LEFT through recovery.
-	for (int32 i = 0; i < 20; ++i) { Fish->SetInputDirection(FVector2D(-1.f, 0.f)); Fish->StepSwim(1.f / 60.f); }
-	TestTrue(TEXT("recovering"), Fish->FleeState() == aquarium::BehaviorState::Recovering);
-	const double YAtRecovery = Fish->GetActorLocation().Y;
-	for (int32 i = 0; i < 60; ++i) { Fish->SetInputDirection(FVector2D(-1.f, 0.f)); Fish->StepSwim(1.f / 60.f); }
-	TestTrue(TEXT("the held key steers again from recovery"), Fish->GetActorLocation().Y < YAtRecovery);
+	TestTrue(TEXT("the click never started a flee on the child's own fish"),
+		Fish->FleeState() == aquarium::BehaviorState::Normal);
+	TestEqual(TEXT("the held key still wins: identical to the unclicked control"),
+		Fish->GetActorLocation().Y, Control->GetActorLocation().Y, 1e-2);
 	return true;
 }
 
-// F-12: a key RELEASED during the flee must not come back to life at recovery.
+// F-12: a key RELEASED during the flee must not come back to life at recovery. M7 사양 변경에
+// 따라 내 물고기는 클릭으로 도망하지 않으므로, 이 테스트는 조종권을 넘겨받지 않는
+// 배경 물고기가 아니라 **그 사실 자체**를 본다: 클릭해도 도망 상태가 없고, 손을 떼면
+// 그대로 멎는다(되살아나는 키도 없다).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorRecoveryUsesCurrentInput, "Aquarium.Fish.RecoveryUsesCurrentInput",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFishActorRecoveryUsesCurrentInput::RunTest(const FString&)
@@ -914,15 +908,27 @@ bool FFishActorRecoveryUsesCurrentInput::RunTest(const FString&)
 	Fish->InitializeSwim();
 	Fish->SetInputDirection(FVector2D(0.f, 1.f));                    // holding UP
 	for (int32 i = 0; i < 30; ++i) { Fish->StepSwim(1.f / 60.f); }
-	Fish->ApplyFleeFrom(Fish->GetActorLocation() + FVector(0.f, 0.f, 15.f));  // flee downward
-	// The child lets go during the flee.
-	for (int32 i = 0; i < 60; ++i) { Fish->SetInputDirection(FVector2D::ZeroVector); Fish->StepSwim(1.f / 60.f); }
-	TestTrue(TEXT("recovering"), Fish->FleeState() == aquarium::BehaviorState::Recovering);
-	const float SpeedAtRecovery = Fish->CurrentSpeed();
-	for (int32 i = 0; i < 72; ++i) { Fish->SetInputDirection(FVector2D::ZeroVector); Fish->StepSwim(1.f / 60.f); }
-	TestTrue(FString::Printf(TEXT("coasts to a stop, no resurrected key (%.2f < %.2f)"),
-		Fish->CurrentSpeed(), SpeedAtRecovery),
-		Fish->CurrentSpeed() < SpeedAtRecovery * 0.5f);
+	Fish->ApplyFleeFrom(Fish->GetActorLocation() + FVector(0.f, 0.f, 15.f));  // 클릭해도 도망은 없다
+	// The child lets go. 클릭은 도망을 만들지 않았으므로 물고기는 그냥 멎어야 한다.
+	for (int32 i = 0; i < 6; ++i) { Fish->SetInputDirection(FVector2D::ZeroVector); Fish->StepSwim(1.f / 60.f); }
+	TestTrue(TEXT("no flee state on the child's own fish"), Fish->FleeState() == aquarium::BehaviorState::Normal);
+	const float SpeedAfterRelease = Fish->CurrentSpeed();
+	TestTrue(TEXT("it was genuinely under way"), SpeedAfterRelease > 1.f);
+	for (int32 i = 0; i < 126; ++i)
+	{
+		Fish->SetInputDirection(FVector2D::ZeroVector);
+		Fish->StepSwim(1.f / 60.f);
+		// 되살아나는 키가 없다는 뜻이므로 매 프레임 본다: 속도가 다시 오르면 안 된다.
+		if (Fish->CurrentSpeed() > SpeedAfterRelease + 1e-3f)
+		{
+			AddError(FString::Printf(TEXT("a released key came back to life on frame %d (%.2f > %.2f)"),
+				i, Fish->CurrentSpeed(), SpeedAfterRelease));
+			return false;
+		}
+	}
+	TestTrue(FString::Printf(TEXT("coasts to a stop (%.2f < %.2f)"),
+		Fish->CurrentSpeed(), SpeedAfterRelease),
+		Fish->CurrentSpeed() < SpeedAfterRelease * 0.5f);
 	return true;
 }
 
@@ -995,13 +1001,19 @@ bool FFishClickOnEmptyWater::RunTest(const FString&)
 namespace
 {
 // A fish whose heading is known, so a click can be aimed exactly in front of or behind it.
-// Player-controlled only to pin the heading; the flee layer overrides the input either way.
+// The input is used ONLY to pin the heading during the warm-up and is switched off before the
+// caller clicks. M7 changed the spec (scenario decision table): a fish the player is driving no
+// longer flees when clicked, so leaving bPlayerControlled on here would make every F-10..F-13
+// test below watch a fish that never startles -- the exact "test that verifies nothing" this
+// project has already shipped five times. These tests are about a STARTLED fish, and a startled
+// fish is by definition one nobody is steering.
 AFishActor* SpawnAimedFish(UWorld* World, int32 WarmupFrames = 120)
 {
 	AFishActor* Fish = SpawnFish(World, 11u);
 	Fish->bPlayerControlled = true;
 	Fish->SetInputDirection(FVector2D(1.f, 0.f));   // screen-right == world +Y
 	for (int32 i = 0; i < WarmupFrames; ++i) { Fish->StepSwim(1.f / 60.f); }
+	Fish->bPlayerControlled = false;                // from here it is an ordinary background fish
 	return Fish;
 }
 aquarium::FacingParams FacingParamsOf(const AFishActor* Fish)
@@ -1081,7 +1093,11 @@ bool FFishFleeDoesNotSlide::RunTest(const FString&)
 	FVector Prev = Start;
 	float WorstDeg = 0.f;
 	int32 Samples = 0;
-	for (int32 i = 0; i < 180; ++i)
+	// 240프레임(4초). M7에서 놀란 물고기는 조종을 받지 않는 배경 물고기가 되었고
+	// 스타일에 따라 속도가 달라지므로, 속도 게이트를 넘는 프레임이 180프레임 안에서는
+	// 101개까지 줄었다. 기준(120개)을 낮추는 대신 **관찰 구간을 늘렸다** -- 15도
+	// 한계를 더 많은 프레임에 걸어 보는 쪽이 더 강한 검사다.
+	for (int32 i = 0; i < 240; ++i)
 	{
 		Fish->StepSwim(1.f / 60.f);
 		const FVector Now = Fish->GetActorLocation();

@@ -160,6 +160,27 @@ AFishActor* AAquariumGameMode::SpawnPlayerFish(USkeletalMesh* Mesh)
 	return Fish;
 }
 
+FVector2D AAquariumGameMode::VisibleHalfExtents(float DistanceCm, float HorizontalFovDeg, float AspectRatio)
+{
+	if (DistanceCm <= KINDA_SMALL_NUMBER || HorizontalFovDeg <= 1.f || HorizontalFovDeg >= 179.f
+		|| AspectRatio <= KINDA_SMALL_NUMBER)
+	{
+		return FVector2D::ZeroVector;
+	}
+	const float HalfWidth = DistanceCm * FMath::Tan(FMath::DegreesToRadians(HorizontalFovDeg) * 0.5f);
+	return FVector2D(HalfWidth, HalfWidth / AspectRatio);
+}
+
+float AAquariumGameMode::ScreenTopZAt(float DepthCm) const
+{
+	// 화면 위 끝보다 조금 더 위에서 지운다 -- 가장자리에서 툭 사라지면 아이가
+	// 알아챈다(시나리오 장면 2 요구사항 3, 시선의 약속).
+	constexpr float kAboveTheEdge = 1.10f;
+	const FVector2D Visible = VisibleHalfExtents(DepthCm, ViewFovDeg, ViewAspect);
+	const float Half = (Visible.Y > 0.f) ? Visible.Y : PlaneHalfHeight;
+	return static_cast<float>(PlaneOrigin.Z) + Half * kAboveTheEdge;
+}
+
 FVector2D AAquariumGameMode::FitPlaneToView(float DistanceCm, float HorizontalFovDeg, float AspectRatio, FVector2D RequestedHalfExtents)
 {
 	// Keep the fish off the very edge of the frame; the name tag sits above the body and would
@@ -170,12 +191,11 @@ FVector2D AAquariumGameMode::FitPlaneToView(float DistanceCm, float HorizontalFo
 	constexpr float kMinHalfHeight = 20.f;
 
 	FVector2D Fitted = RequestedHalfExtents;
-	if (DistanceCm > KINDA_SMALL_NUMBER && HorizontalFovDeg > 1.f && HorizontalFovDeg < 179.f && AspectRatio > KINDA_SMALL_NUMBER)
+	const FVector2D Visible = VisibleHalfExtents(DistanceCm, HorizontalFovDeg, AspectRatio);
+	if (Visible.X > 0.f)
 	{
-		const float VisibleHalfWidth = DistanceCm * FMath::Tan(FMath::DegreesToRadians(HorizontalFovDeg) * 0.5f) * kInset;
-		const float VisibleHalfHeight = VisibleHalfWidth / AspectRatio;
-		Fitted.X = FMath::Min(Fitted.X, VisibleHalfWidth);
-		Fitted.Y = FMath::Min(Fitted.Y, VisibleHalfHeight);
+		Fitted.X = FMath::Min(Fitted.X, Visible.X * kInset);
+		Fitted.Y = FMath::Min(Fitted.Y, Visible.Y * kInset);
 	}
 	Fitted.X = FMath::Max(Fitted.X, kMinHalfWidth);
 	Fitted.Y = FMath::Max(Fitted.Y, kMinHalfHeight);
@@ -209,6 +229,8 @@ void AAquariumGameMode::FitSwimPlaneToViewport()
 	}
 
 	// Always from the authored request, never from the current extents (see the header).
+	ViewFovDeg = Fov;
+	ViewAspect = Aspect;
 	const FVector2D Fitted = FitPlaneToView(PlaneOrigin.X, Fov, Aspect, RequestedPlaneHalfExtents);
 	PlaneHalfWidth = Fitted.X;
 	PlaneHalfHeight = Fitted.Y;

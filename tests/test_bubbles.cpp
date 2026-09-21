@@ -78,3 +78,18 @@ TEST_CASE("MakeBubble is deterministic") {
     REQUIRE(a.radius == Approx(b.radius));
     REQUIRE(a.swayPhase == Approx(b.swayPhase));
 }
+
+TEST_CASE("each bubble is judged by its own top, not one shared height") {
+    // 원근 때문에 깊은 평면일수록 화면 위 끝이 높다. 하나의 높이를 공유하면 깊은
+    // 곳의 기포가 화면 한가운데에서 사라지고, 아이는 그것을 알아챈다.
+    Bubble shallow = MakeBubble({0.f, 0.f}, 220.f, 2u, kB);
+    Bubble deep = MakeBubble({0.f, 0.f}, 700.f, 2u, kB);
+    shallow.topY = 100.f;
+    deep.topY = 900.f;                       // 같은 화면 비율, 3배 이상 깊은 평면
+    for (int i = 0; i < 300; ++i) { StepBubble(shallow, 1.f / 60.f, kB); StepBubble(deep, 1.f / 60.f, kB); }
+    REQUIRE(BubbleIsGone(shallow));          // 얕은 쪽은 이미 나갔고
+    REQUIRE_FALSE(BubbleIsGone(deep));       // 깊은 쪽은 아직 화면 안이다
+    // 그리고 결국은 깊은 쪽도 자기 높이를 넘는다.
+    for (int i = 0; i < 1800; ++i) { StepBubble(deep, 1.f / 60.f, kB); }
+    REQUIRE(BubbleIsGone(deep));
+}

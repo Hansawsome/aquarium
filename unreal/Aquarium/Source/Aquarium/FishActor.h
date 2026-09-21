@@ -11,6 +11,7 @@
 #include "aquarium/Heading.h"
 #include "aquarium/Motion.h"
 #include "aquarium/Obstacles.h"
+#include "aquarium/Reaction.h"
 #include "aquarium/SwimAnimation.h"
 #include "aquarium/SwimPlane.h"
 #include "aquarium/Wander.h"
@@ -84,6 +85,12 @@ public:
 	// decides what a second touch means (ignored mid-flee, restarts during recovery).
 	void ApplyFleeFrom(const FVector& WorldTouch);
 	aquarium::BehaviorState FleeState() const { return Flee.State(); }
+	// 이번 놀람이 어떤 모양인지. 클릭마다 달라진다(시나리오 장면 2 요구사항 2).
+	aquarium::ReactionStyle StartleStyle() const { return StartleStyleValue; }
+	// 놀람 중 시각 회전(도/초). 몸짓을 만들되 이동에는 영향이 없다.
+	float StartleSpinDegPerSec() const;
+	// 내 물고기의 재롱이 살아 있는지. 조종권과는 무관한 시각 상태다.
+	bool PlayerReactionActive() const { return PlayerReactionValue.Active(); }
 	// This fish as a click can see it, in the shared swim frame. Half extents are DERIVED from the
 	// rendered bounds (so the player fish's 34 cm normalization scale is included automatically);
 	// no per-species radius table is copied into C++.
@@ -128,6 +135,16 @@ private:
 	aquarium::BoidsParams BoidsParamsValue;
 	aquarium::FleeStateMachine Flee;
 	aquarium::FleeParams FleeParamsValue;
+	aquarium::ReactionStyle StartleStyleValue = aquarium::ReactionStyle::Dart;
+	aquarium::StartleShape StartleShapeValue;
+	float StartleSpinDeg = 0.f;     // 누적 시각 회전(도)
+	// 놀람의 덧붙인 회전을 **뺀** 자세. 회전 속도 제한이 자기가 만든 연출 회전을
+	// 되먹임해 매 프레임 되돌리려 드는 것을 막는다 -- 그렇게 두면 덧붙인 각도만큼
+	// 프레임 변화가 커져 F-13의 연속성 검사가 178도에서 터진다(실제로 터졌다).
+	FQuat FacingQuat = FQuat::Identity;
+	bool bHasFacingQuat = false;
+	aquarium::PlayerReaction PlayerReactionValue;
+	aquarium::PlayerReactionParams PlayerReactionParamsValue;
 	int32 SpeciesKeyValue = 0;
 	int32 ComputeSpeciesKey() const;
 	void BuildSortedNeighbors(const std::vector<aquarium::BoidNeighbor>& Snapshot, const aquarium::Vec2& Shared);

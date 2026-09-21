@@ -86,6 +86,8 @@ void AFishActor::InitializeSwim()
 	InputDirection = {0.f, 0.f};
 	LastHeadingDeg = 0.f;
 	bHasHeading = false;
+	bHasFacingQuat = false;
+	StartleSpinDeg = 0.f;
 	BendTurnRate = 0.f;
 	if (FishMesh)
 	{
@@ -127,7 +129,11 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	// The speed burst is what makes a course change read as being startled (F-10). Only maxSpeed
 	// is scaled; scaling accel as well would spike the velocity on the first frame, which is the
 	// "sliding" F-13 forbids.
-	MotionParamsValue.maxSpeed = MaxSpeed * Flee.SpeedScale(FleeParamsValue);
+	// 스타일별 배율. ShapeFor가 FleeParams에서 파생하므로 도망 속도 상수는
+	// 여전히 규칙 계층 한 곳에만 있다.
+	const float StyleScale = (Flee.State() == aquarium::BehaviorState::Normal)
+		? 1.f : (StartleShapeValue.speedScale / FleeParamsValue.fleeSpeedScale);
+	MotionParamsValue.maxSpeed = MaxSpeed * Flee.SpeedScale(FleeParamsValue) * StyleScale;
 	// Schooling applies to background fish only. The player's fish is never a boid: arrow keys
 	// must map to motion with nothing mixed in, or the child gets "I pressed left and it went
 	// somewhere else" (F-05/F-07). The other direction -- background fish reacting to the player
@@ -225,7 +231,7 @@ void AFishActor::StepSwim(float DeltaSeconds)
 		// at 540 deg/s that is ~0.33 s of visible pirouette. The swing limit is unchanged, so
 		// ordinary turning looks exactly as it did in M3; only the twist is allowed to go fast,
 		// and only while the heading is steep enough that the fish is end-on to the camera.
-		const FQuat Current = GetActorQuat();
+		const FQuat Current = bHasFacingQuat ? FacingQuat : GetActorQuat();
 		FQuat Next = Target;
 		float AppliedSwingDeg = 0.f;
 		if (!bFirstHeading)
@@ -245,7 +251,40 @@ void AFishActor::StepSwim(float DeltaSeconds)
 			AppliedSwingDeg = FMath::RadiansToDegrees(
 				FMath::Acos(FMath::Clamp(static_cast<float>(FVector::DotProduct(CurFwd, Next.GetAxisX())), -1.f, 1.f)));
 		}
+		FacingQuat = Next;
+		bHasFacingQuat = true;
 		SetActorRotation(Next);
+
+		// 놀람의 몸짓과 내 물고기의 재롱은 **덧붙이는 회전**이다. 속도에도
+		// 입력에도 손대지 않으므로 조종권과 경계 보장이 그대로 유지된다.
+		PlayerReactionValue.Update(DeltaSeconds, PlayerReactionParamsValue);
+		// 회전을 끝에서 툭 0으로 되돌리면 한 프레임에 180도가 튄다 -- F-13이 금지하는
+		// 바로 그 불연속이고, 아이 눈에는 물고기가 순간이동한 것으로 보인다. 그래서
+		// 회복 구간에서 **같은 방향으로 한 바퀴를 마저 돌아** 360의 배수에서 끝낸다.
+		// 360의 배수는 회전이 없는 것과 같으므로 Normal로 돌아갈 때 튐이 없다.
+		if (Flee.State() == aquarium::BehaviorState::Fleeing)
+		{
+			StartleSpinDeg += StartleShapeValue.spinDegPerSec * DeltaSeconds;
+		}
+		else if (Flee.State() == aquarium::BehaviorState::Recovering && StartleShapeValue.spinDegPerSec != 0.f)
+		{
+			const float SpinRate = FMath::Abs(StartleShapeValue.spinDegPerSec);
+			const float SpinSign = StartleShapeValue.spinDegPerSec > 0.f ? 1.f : -1.f;
+			const float SpinTarget = (SpinSign > 0.f ? FMath::CeilToFloat(StartleSpinDeg / 360.f)
+											 : FMath::FloorToFloat(StartleSpinDeg / 360.f)) * 360.f;
+			const float SpinStep = SpinRate * DeltaSeconds;
+			StartleSpinDeg = (FMath::Abs(SpinTarget - StartleSpinDeg) <= SpinStep)
+				? SpinTarget : (StartleSpinDeg + SpinSign * SpinStep);
+		}
+		else if (Flee.State() == aquarium::BehaviorState::Normal)
+		{
+			StartleSpinDeg = 0.f;
+		}
+		const float ExtraRoll = StartleSpinDeg + PlayerReactionValue.RollOffsetDeg(PlayerReactionParamsValue);
+		if (FMath::Abs(ExtraRoll) > 1e-3f)
+		{
+			SetActorRotation(Next * FQuat(FVector::ForwardVector, FMath::DegreesToRadians(ExtraRoll)));
+		}
 
 		if (!bFirstHeading)
 		{
@@ -398,7 +437,27 @@ void AFishActor::ApplyFleeFrom(const FVector& WorldTouch)
 	// centre IS the direction toward the screen centre. When the fish is exactly at the centre
 	// this is zero too, and the rules layer's last-resort fallback takes over.
 	const aquarium::Vec2 TowardCentre = (aquarium::Vec2{0.f, 0.f} - Motion.position).Normalized();
+
+	// 시나리오 결정표: **내 물고기는 도망가지 않는다.** 그 자리에서 재롱을 부리고
+	// 조종권을 한 순간도 잃지 않는다. 아이가 가장 아끼는 것이 자기 물고기라,
+	// 화면 밖으로 튀어나가고 잠깐 조종이 안 먹는 것은 재미가 아니라 사고다.
+	if (bIsPlayerFish || bPlayerControlled)
+	{
+		PlayerReactionValue.Touch(static_cast<uint32>(GetUniqueID())
+			+ static_cast<uint32>(PlayerReactionValue.TouchCount()) * 2654435761u);
+		return;   // Flee에는 손도 대지 않는다 -- 조종을 건드릴 경로가 아예 없다
+	}
+
+	// 매번 다른 모양으로 놀란다. 시드는 이 물고기와 이번 터치 번호에서 나온다.
+	StartleStyleValue = aquarium::PickReactionStyle(
+		static_cast<uint32>(GetUniqueID()) * 2654435761u + static_cast<uint32>(Flee.TouchCount()));
+	StartleShapeValue = aquarium::ShapeFor(StartleStyleValue, FleeParamsValue);
 	Flee.Touch(TouchLocal, Motion.position, Motion.velocity, TowardCentre, FleeParamsValue);
+}
+
+float AFishActor::StartleSpinDegPerSec() const
+{
+	return Flee.State() == aquarium::BehaviorState::Fleeing ? StartleShapeValue.spinDegPerSec : 0.f;
 }
 
 aquarium::ClickTarget AFishActor::AsClickTarget() const

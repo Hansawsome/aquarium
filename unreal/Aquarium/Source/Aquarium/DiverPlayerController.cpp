@@ -1,6 +1,7 @@
 #include "DiverPlayerController.h"
 
 #include "AquariumAudioSubsystem.h"
+#include "BubbleSubsystem.h"
 
 #include "FishSchoolSubsystem.h"
 #include "Blueprint/UserWidget.h"
@@ -232,8 +233,39 @@ bool ADiverPlayerController::HandleClickRay(const FVector& RayOrigin, const FVec
 	case aquarium::BehaviorState::Recovering: LastClickState = TEXT("Recovering"); break;
 	default:                                  LastClickState = TEXT("Normal"); break;
 	}
+	const bool bOwnFish = (Fish == GM->PlayerFish());
 	Fish->ApplyFleeFrom(Hit);   // exactly one fish per click
+	if (UWorld* WW = GetWorld())
+	{
+		if (UAquariumAudioSubsystem* Audio = WW->GetSubsystem<UAquariumAudioSubsystem>())
+		{
+			// 내 물고기는 「뽀글」, 남의 물고기는 「꺅」. 아이가 소리만으로 구분한다.
+			Audio->PlayCue(bOwnFish ? EAquariumCue::Bubble : EAquariumCue::Startle,
+				static_cast<uint32>(FMath::Rand()));
+		}
+		if (UBubbleSubsystem* Bubbles = WW->GetSubsystem<UBubbleSubsystem>())
+		{
+			// **이 클릭이 맞힌 깊이**에서 화면 위 끝을 구한다. 계획은 플레이어
+			// 평면 하나로 계산했는데, 배경 물고기는 X 330~700에 있고 플레이어
+			// 평면은 X 220이라 깊은 물고기의 기포가 화면 1/3 높이에서 사라졌을
+			// 것이다 -- 시선의 약속이 정확히 여기서 깨진다.
+			Bubbles->Spawn(Hit, bOwnFish ? 5 : 9, static_cast<uint32>(FMath::Rand()),
+				BubbleTopZAt(static_cast<float>(Hit.X)));
+		}
+	}
 	return true;
+}
+
+float ADiverPlayerController::BubbleTopZAt(float DepthCm)
+{
+	// 기포가 사라지는 높이는 **카메라와 그 깊이에서 파생**한다. 여기에 숫자를
+	// 적으면 M3이 화면 비율에 맞춰 유영 평면을 정하는 규칙과 어긋나게 되고,
+	// 그 어긋남은 "기포가 화면 중간에서 사라진다"로만 드러난다.
+	if (AAquariumGameMode* GM = GameMode())
+	{
+		return GM->ScreenTopZAt(DepthCm);
+	}
+	return 400.f;
 }
 
 void ADiverPlayerController::Tick(float DeltaSeconds)

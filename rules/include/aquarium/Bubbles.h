@@ -16,6 +16,11 @@ struct Bubble {
     float radius = 0.f;
     float age = 0.f;
     float baseX = 0.f;    // 좌우 흔들림의 기준선. 표류를 구조적으로 막는다
+    // **이 기포가** 화면 위를 넘는 높이. 기포마다 다르다: 카메라가 원근이라
+    // 깊은 평면일수록 화면 위 끝이 더 높다. 전체에 하나의 높이를 쓰면 깊은
+    // 물고기에서 난 기포가 화면 한가운데에서 사라진다 -- 시선의 약속이 깨지는
+    // 자리가 정확히 여기다(계획의 BubbleTopZ가 이 함정에 빠져 있었다).
+    float topY = 0.f;
 };
 
 struct BubbleParams {
@@ -58,5 +63,9 @@ inline void StepBubble(Bubble& b, float dt, const BubbleParams& p) {
 inline bool BubbleIsGone(const Bubble& b, float topY) {
     return b.position.y >= topY;
 }
+
+// 기포가 스스로 가진 높이로 판정한다. 엔진은 이쪽을 쓴다 -- 클릭이 맞힌 평면의
+// 깊이에서 화면 위 끝을 계산해 기포마다 심어 두기 때문이다.
+inline bool BubbleIsGone(const Bubble& b) { return b.position.y >= b.topY; }
 
 } // namespace aquarium
