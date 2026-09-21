@@ -199,6 +199,12 @@ assert prop_mesh_names == PROP_MESH_NAMES, \
 # instances exist but nothing in the frame looks different.
 tint_suffixes = {n.rsplit("_", 1)[-1] for n in tint_names}
 assert len(tint_suffixes) >= 2, "props use only one tint variant: %s" % sorted(tint_names)
+# Runtime obstacle avoidance finds props by actor tag. A missing tag is invisible in the frame and
+# would just make fish swim through that coral, so it is asserted here rather than discovered live.
+tagged = [a for a in actors if a.actor_has_tag(unreal.Name("AquariumProp"))]
+assert len(tagged) == len(props), \
+    "prop tag count %d != prop count %d (runtime obstacle avoidance would silently see fewer props)" \
+    % (len(tagged), len(props))
 
 # Post-process grade (M4b): unbound, and every field it sets must have its override_ flag on,
 # because a PostProcessSettings field with the flag left False is silently ignored.
@@ -222,6 +228,6 @@ ws_list = unreal.GameplayStatics.get_all_actors_of_class(world, unreal.WorldSett
 assert len(ws_list) == 1, "expected exactly one WorldSettings, got %d" % len(ws_list)
 assert ws_list[0].get_editor_property("default_game_mode") is None, "map overrides the default game mode"
 
-print("SCENE_OK actors=%d fish=%d props=%d species=%d curtains=%d tints=%d"
-      % (len(actors), len(fishes), len(props), len(mesh_names),
+print("SCENE_OK actors=%d fish=%d props=%d tagged=%d species=%d curtains=%d tints=%d"
+      % (len(actors), len(fishes), len(props), len(tagged), len(mesh_names),
          len(curtains), len(tint_names)))
