@@ -131,17 +131,41 @@ FOG_VOLUMETRIC_DISTANCE = 6000.0
 # Surface gobo: an invisible shadow caster at the waterline. Volumetric god rays are
 # scattering intensity TIMES shadow contrast, and this scene had nothing above the camera to
 # cast a shadow at all -- which is why "빛줄기 약함" survived every intensity increase in M1.
+# One plane cannot do both jobs. Coarse apertures give the volumetric fog the shadow contrast
+# that makes god rays; fine apertures give the sand a ripple pattern that matches M_Caustics.
+# Tuning one wrecks the other (105e4c8 had strong shafts and oil-slick blobs on the sand;
+# 60c3f4b had a correct sand pattern and almost no shafts), so M4b uses TWO stacked planes.
+#
+# Fine layer: the 60c3f4b tuning, low over the reef, so its shadow edges stay crisp on the sand.
 GOBO_Z = 1100.0
 GOBO_SCALE = 60.0                       # 100 cm plane -> 60 m, wider than the 40 m floor
 GOBO_THRESHOLD = 0.56                   # opacity-mask cutoff; higher = narrower, sharper shafts
 # Ripple cell size relative to the floor caustics periods (52..89 cm). The first M4b pass used
 # 3.0 -- three times COARSER than the floor pattern -- and the result on the sand was a handful
-# of hard-edged puddles several metres across that read as an oil slick, not as water. 0.7 makes
+# of hard-edged puddles several metres across that read as an oil slick, not as water. 0.9 makes
 # the gobo cells slightly FINER than the floor caustics, so many ripples cross the visible floor
 # and the two patterns read as coming from the same water surface.
 GOBO_PERIOD_SCALE = 0.9
 GOBO_EDGE_GAIN = 2.5                    # mask ramp; the blend mode still clips, so this only
                                         # shifts where the edge lands, not how soft it is
+
+# Coarse layer: the 105e4c8 tuning (3 unwarped waves, 3x the floor period, threshold 0.42,
+# edge gain 8) whose ONLY job is volumetric contrast. It is parked far above the fine plane for
+# two reasons. (1) No z-fighting. (2) A masked occluder casts a binary shadow, so the only
+# softening available is the sun's penumbra, which grows with height: at COARSE_Z the plane is
+# ~39 m over the sand and 39 m * tan(SUN_SOURCE_ANGLE) blurs each edge by ~4.8 m, about the size
+# of a coarse aperture -- so the coarse pattern washes out on the sand (no oil slick) while it
+# still modulates the fog it passes through on the way down.
+# The sun is pitched -65 deg / yaw 30 deg, so a shadow drops by (0.40, 0.23) x height in XY;
+# at 39 m that is (15.8, 9.1) m, which is why the coarse plane is offset back along -X/-Y and
+# made much wider than the floor.
+GOBO_COARSE_Z = 7000.0
+GOBO_COARSE_XY = (-2400.0, -1600.0)
+GOBO_COARSE_SCALE = 200.0
+GOBO_COARSE_PERIOD_SCALE = 3.0
+GOBO_COARSE_THRESHOLD = 0.44
+GOBO_COARSE_EDGE_GAIN = 8.0
+GOBO_COARSE_WAVES = 3                   # unwarped: the warp is what makes fine ripples organic
 
 # Post-process. Auto exposure is already off project-wide (r.DefaultFeature.AutoExposure=False),
 # so these are absolute. Lowering the fog costs contrast; the grade puts it back.
@@ -165,10 +189,13 @@ DOF = None
 # project does not do. The camera is fixed, so translucent curtains standing across the view do
 # the job with a fully scripted material graph.
 # (tag, distance X, uniform scale, cell size cm, dot radius, brightness, drift cm/s)
+# Brightness was raised from 0.55/0.40/0.28 after a 1920x1080 capture: at the plan defaults the
+# specks were technically present but read as almost nothing on screen. Cell size and dot radius
+# are unchanged, so the DENSITY is the same -- only the specks' luminance went up.
 SNOW_CURTAINS = [
-    ("near", 90.0,  3.0, 26.0, 0.11, 0.55, -7.0),
-    ("mid",  240.0, 7.0, 17.0, 0.13, 0.40, -5.0),
-    ("far",  480.0, 13.0, 11.0, 0.15, 0.28, -3.5),
+    ("near", 90.0,  3.0, 26.0, 0.11, 0.80, -7.0),
+    ("mid",  240.0, 7.0, 17.0, 0.13, 0.60, -5.0),
+    ("far",  480.0, 13.0, 11.0, 0.15, 0.42, -3.5),
 ]
 SNOW_COLOR = dict(r=0.72, g=0.86, b=0.92, a=1.0)
 SNOW_Z = 130.0
@@ -350,8 +377,8 @@ eal.save_loaded_asset(m_caus)
 
 
 
-def build_surface_gobo(m):
-    """Opacity-mask material for the invisible waterline plane. Reuses the caustics wave sum:
+def build_surface_gobo(m, period_scale, threshold, edge_gain, n_waves, warped):
+    """Opacity-mask material for an invisible waterline plane. Reuses the caustics wave sum:
     where the sum is above GOBO_THRESHOLD the plane is solid and blocks the sun, elsewhere it is
     cut away and the sun gets through. The holes therefore drift with the same rhythm as the
     floor caustics, so the shafts and the floor patches move together. Unlit and masked; the
@@ -400,29 +427,29 @@ def build_surface_gobo(m):
     warp_turns = CAUSTIC_WARP / (2.0 * math.pi)
     prev = None
     waves = []
-    for i, (period, angle, drift) in enumerate(CAUSTIC_WAVES):
+    for i, (period, angle, drift) in enumerate(CAUSTIC_WAVES[:n_waves]):
         y = -450 + i * 220
-        kx = math.cos(math.radians(angle)) / (period * GOBO_PERIOD_SCALE)
-        ky = math.sin(math.radians(angle)) / (period * GOBO_PERIOD_SCALE)
+        kx = math.cos(math.radians(angle)) / (period * period_scale)
+        ky = math.sin(math.radians(angle)) / (period * period_scale)
         ax = mul(px, const(-1600, y - 60, kx), -1450, y - 60)
         ay = mul(py, const(-1600, y, ky), -1450, y)
         at = mul(t, const(-1600, y + 60, drift * 0.5), -1450, y + 60)
         phase = add(add(ax, ay, -1300, y), at, -1150, y)
-        if prev is not None:
+        if warped and prev is not None:
             phase = add(phase, mul(prev, const(-1150, y + 90, warp_turns), -1000, y + 60), -850, y)
         prev = sine(phase, -700, y)
         waves.append(prev)
     s = waves[0]
     for i, w in enumerate(waves[1:]):
         s = add(s, w, -550 + i * 100, -100)
-    n_waves = float(len(waves))
-    norm = add(mul(s, const(-250, 100, 1.0 / (2.0 * n_waves)), -150, -100),
+    n = float(len(waves))
+    norm = add(mul(s, const(-250, 100, 1.0 / (2.0 * n)), -150, -100),
                const(-150, 100, 0.5), -50, -100)
-    # opacity mask = saturate((norm - threshold) * GOBO_EDGE_GAIN)
+    # opacity mask = saturate((norm - threshold) * edge_gain)
     off = node(unreal.MaterialExpressionSubtract, 550, -100)
     mel.connect_material_expressions(norm, "", off, "A")
-    mel.connect_material_expressions(const(550, 100, GOBO_THRESHOLD), "", off, "B")
-    gain = mul(off, const(700, 100, GOBO_EDGE_GAIN), 800, -100)
+    mel.connect_material_expressions(const(550, 100, threshold), "", off, "B")
+    gain = mul(off, const(700, 100, edge_gain), 800, -100)
     sat = node(unreal.MaterialExpressionSaturate, 950, -100)
     mel.connect_material_expressions(gain, "", sat, "")
     mel.connect_material_property(sat, "", unreal.MaterialProperty.MP_OPACITY_MASK)
@@ -430,14 +457,23 @@ def build_surface_gobo(m):
                                   unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
-m_gobo = material("M_SurfaceGobo")
-m_gobo.set_editor_property("material_domain", unreal.MaterialDomain.MD_SURFACE)
-m_gobo.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
-m_gobo.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
-m_gobo.set_editor_property("two_sided", True)
-build_surface_gobo(m_gobo)
-mel.recompile_material(m_gobo)
-eal.save_loaded_asset(m_gobo)
+def make_gobo_material(name, period_scale, threshold, edge_gain, n_waves, warped):
+    m = material(name)
+    m.set_editor_property("material_domain", unreal.MaterialDomain.MD_SURFACE)
+    m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    m.set_editor_property("two_sided", True)
+    build_surface_gobo(m, period_scale, threshold, edge_gain, n_waves, warped)
+    mel.recompile_material(m)
+    eal.save_loaded_asset(m)
+    return m
+
+
+m_gobo = make_gobo_material("M_SurfaceGobo", GOBO_PERIOD_SCALE, GOBO_THRESHOLD,
+                            GOBO_EDGE_GAIN, len(CAUSTIC_WAVES), True)
+m_gobo_coarse = make_gobo_material("M_SurfaceGoboCoarse", GOBO_COARSE_PERIOD_SCALE,
+                                   GOBO_COARSE_THRESHOLD, GOBO_COARSE_EDGE_GAIN,
+                                   GOBO_COARSE_WAVES, False)
 
 
 
@@ -647,15 +683,24 @@ fc.set_editor_property("volumetric_fog_distance", FOG_VOLUMETRIC_DISTANCE)
 # Invisible shadow caster: set_visibility(False) + cast_hidden_shadow is Unreal's supported way
 # to have geometry that is never drawn but still occludes light, so nothing appears in the sky
 # above the diver while the volumetric fog gains the shadow contrast it needs for shafts.
-gobo = spawn(unreal.StaticMeshActor, (400, 0, GOBO_Z), label="SurfaceGobo")
-gc = gobo.static_mesh_component
-gc.set_mobility(unreal.ComponentMobility.STATIC)
-assert gc.set_static_mesh(unreal.load_asset(ENGINE_PLANE)), "gobo mesh missing: %s" % ENGINE_PLANE
-gc.set_material(0, m_gobo)
-gobo.set_actor_scale3d(unreal.Vector(GOBO_SCALE, GOBO_SCALE, 1))
-gc.set_visibility(False)
-gc.set_cast_hidden_shadow(True)
-gc.set_editor_property("cast_shadow", True)
+def spawn_gobo(label, loc, scale, mat):
+    a = spawn(unreal.StaticMeshActor, loc, label=label)
+    c = a.static_mesh_component
+    c.set_mobility(unreal.ComponentMobility.STATIC)
+    assert c.set_static_mesh(unreal.load_asset(ENGINE_PLANE)), \
+        "gobo mesh missing: %s" % ENGINE_PLANE
+    c.set_material(0, mat)
+    a.set_actor_scale3d(unreal.Vector(scale, scale, 1))
+    c.set_visibility(False)
+    c.set_cast_hidden_shadow(True)
+    c.set_editor_property("cast_shadow", True)
+    return a
+
+
+spawn_gobo("SurfaceGobo", (400, 0, GOBO_Z), GOBO_SCALE, m_gobo)
+spawn_gobo("SurfaceGoboCoarse",
+           (GOBO_COARSE_XY[0], GOBO_COARSE_XY[1], GOBO_COARSE_Z),
+           GOBO_COARSE_SCALE, m_gobo_coarse)
 
 cam = spawn(unreal.CameraActor, CAM_LOC, CAM_ROT, label="DiverCamera")
 cam.tags = [unreal.Name("DiverCamera")]

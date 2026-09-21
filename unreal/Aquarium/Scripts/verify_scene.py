@@ -8,6 +8,7 @@ import unreal
 MAP = "/Game/Maps/ReefM1"
 SAND_MATERIAL = "/Game/Env/M_Sand"
 GOBO_MATERIAL = "/Game/Env/M_SurfaceGobo"
+GOBO_COARSE_MATERIAL = "/Game/Env/M_SurfaceGoboCoarse"
 SNOW_MATERIAL = "/Game/Env/M_MarineSnow"
 SNOW_CURTAIN_TAGS = ("near", "mid", "far")
 
@@ -38,8 +39,8 @@ for a in actors:
 
 need = {"CameraActor": 1, "DirectionalLight": 1, "SkyLight": 1,
         "ExponentialHeightFog": 1,
-        # floor + gobo + snow curtains + props
-        "StaticMeshActor": 2 + len(SNOW_CURTAIN_TAGS) + PROP_COUNT,
+        # floor + fine gobo + coarse gobo + snow curtains + props
+        "StaticMeshActor": 3 + len(SNOW_CURTAIN_TAGS) + PROP_COUNT,
         "FishActor": SCHOOL_COUNT}
 missing = [k for k, n in need.items() if len(by_class.get(k, [])) < n]
 assert not missing, "missing actors: %s" % missing
@@ -103,17 +104,31 @@ assert floor_mat.get_path_name().startswith(SAND_MATERIAL), "floor material is n
 
 # Surface gobo: the invisible waterline shadow caster (M4b). It must never be drawn but must
 # still cast a shadow, otherwise the volumetric fog has no contrast and the god rays vanish.
-gobos = [a for a in smas if a.get_actor_label() == "SurfaceGobo"]
-assert len(gobos) == 1, "expected exactly one SurfaceGobo, got %d" % len(gobos)
-gobo = gobos[0]
-ggc = gobo.static_mesh_component
-assert ggc.static_mesh is not None, "gobo has no static mesh"
-assert not ggc.is_visible(), "SurfaceGobo must be invisible"
-assert ggc.get_editor_property("cast_hidden_shadow"), "SurfaceGobo must cast a hidden shadow"
-assert ggc.get_editor_property("cast_shadow"), "SurfaceGobo must cast a shadow"
-gobo_mat = ggc.get_material(0)
-assert gobo_mat is not None and gobo_mat.get_path_name().startswith(GOBO_MATERIAL), \
-    "gobo material is not M_SurfaceGobo: %s" % (gobo_mat and gobo_mat.get_path_name())
+# There are TWO of them: a fine plane low over the reef whose shadow is the sand's ripple
+# pattern, and a coarse plane far above it whose only job is volumetric contrast for the god
+# rays. Each must carry its OWN material -- pointing both at the same one silently collapses
+# the scene back to the single-layer version that could only do one of the two jobs.
+GOBOS = {"SurfaceGobo": GOBO_MATERIAL, "SurfaceGoboCoarse": GOBO_COARSE_MATERIAL}
+gobos = [a for a in smas if a.get_actor_label() in GOBOS]
+assert len(gobos) == len(GOBOS), \
+    "expected %d gobo planes %s, got %s" % (len(GOBOS), sorted(GOBOS),
+                                            sorted(a.get_actor_label() for a in gobos))
+gobo_z = {}
+for gobo in gobos:
+    label = gobo.get_actor_label()
+    ggc = gobo.static_mesh_component
+    assert ggc.static_mesh is not None, "%s has no static mesh" % label
+    assert not ggc.is_visible(), "%s must be invisible" % label
+    assert ggc.get_editor_property("cast_hidden_shadow"), "%s must cast a hidden shadow" % label
+    assert ggc.get_editor_property("cast_shadow"), "%s must cast a shadow" % label
+    gobo_mat = ggc.get_material(0)
+    # Exact asset name, not startswith: "M_SurfaceGobo" is a prefix of "M_SurfaceGoboCoarse".
+    assert gobo_mat is not None and gobo_mat.get_path_name().split(".")[0] == GOBOS[label], \
+        "%s material is not %s: %s" % (label, GOBOS[label],
+                                       gobo_mat and gobo_mat.get_path_name())
+    gobo_z[label] = gobo.get_actor_location().z
+assert gobo_z["SurfaceGoboCoarse"] > gobo_z["SurfaceGobo"] + 100.0, \
+    "the coarse gobo must sit well above the fine one (no z-fighting, wider penumbra): %s" % gobo_z
 
 # Marine snow curtains (M4b Task 7): three translucent unlit planes standing across the fixed
 # camera's view. They must be visible (they ARE the effect), must carry a MI_MarineSnow_*
@@ -140,7 +155,7 @@ assert curtain_tags == set(SNOW_CURTAIN_TAGS), \
     "snow curtain tags are %s, expected %s" % (sorted(curtain_tags), sorted(SNOW_CURTAIN_TAGS))
 
 # Reef props: every other StaticMeshActor. Known meshes, clear of the camera lane.
-props = [a for a in smas if a is not floor and a is not gobo and a not in curtains]
+props = [a for a in smas if a is not floor and a not in gobos and a not in curtains]
 assert len(props) == PROP_COUNT, "expected %d reef props, got %d" % (PROP_COUNT, len(props))
 prop_mesh_names = set()
 tint_names = set()
