@@ -214,8 +214,15 @@ def import_rock(rid):
     nor = import_texture(os.path.join(tex_dir, "%s_nor_gl_1k.jpg" % rid),
                          "T_%s_N" % rid, srgb=False,
                          compression=unreal.TextureCompressionSettings.TC_NORMALMAP)
+    # TC_MASKS is required, not just srgb=False: a mask left on TC_Default is a
+    # colour texture as far as the material compiler is concerned, and the
+    # Linear Grayscale/Masks sampler below then fails the whole material
+    # ("Sampler type is Linear Grayscale, should be Linear Color"), which
+    # silently swaps the rock for the grey Default Material at runtime. Same
+    # bug, same fix as the fish roughness maps in import_fish.py.
     rgh = import_texture(os.path.join(tex_dir, "%s_rough_1k.jpg" % rid),
-                         "T_%s_R" % rid, srgb=False)
+                         "T_%s_R" % rid, srgb=False,
+                         compression=unreal.TextureCompressionSettings.TC_MASKS)
     ao = import_texture(os.path.join(tex_dir, "%s_ao_1k.jpg" % rid),
                         "T_%s_AO" % rid, srgb=False)
 
@@ -238,7 +245,7 @@ def import_rock(rid):
 
     n_rgh = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, 700)
     n_rgh.set_editor_property("texture", rgh)
-    n_rgh.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE)
+    n_rgh.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_MASKS)
     mel.connect_material_property(n_rgh, "R", unreal.MaterialProperty.MP_ROUGHNESS)
 
     mel.recompile_material(mat)
