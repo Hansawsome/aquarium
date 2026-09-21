@@ -35,13 +35,20 @@ inline Vec2 ComputeFleeDirection(Vec2 touch, Vec2 fishPos, Vec2 velocity, Vec2 f
 
 class FleeStateMachine {
 public:
+    // 시나리오 장면 2 요구사항 4: 연타가 이 게임의 기본 사용법이다. M5의 F-11은
+    // 도망 중 재터치를 **무시**했는데, 아이에게 그것은 "고장났다"로 읽힌다. 이제
+    // 재터치는 다시 겨누고 타이머를 새로 채운다. F-11이 원래 막으려던 것은 상태가
+    // 꼬이는 것이었고, 아래 코드는 재진입해도 꼬이지 않는다(모든 필드를 다시 쓴다).
     void Touch(Vec2 touch, Vec2 fishPos, Vec2 velocity, Vec2 fallbackDir, const FleeParams& p) {
-        if (state_ == BehaviorState::Fleeing) return;   // F-11: ignore re-touch mid-flee
         fleeDir_ = ComputeFleeDirection(touch, fishPos, velocity, fallbackDir);
         state_ = BehaviorState::Fleeing;
         timer_ = p.fleeDuration;
         recoverDuration_ = p.recoverDuration;
+        ++touchCount_;
     }
+
+    // 받은 터치의 총 수. 삼킨 클릭이 하나도 없다는 것을 테스트가 확인하는 수단이다.
+    int TouchCount() const { return touchCount_; }
 
     void Step(float dt) {
         if (state_ == BehaviorState::Normal || dt <= 0.f) return;
@@ -81,6 +88,7 @@ private:
     Vec2 fleeDir_;
     float timer_ = 0.f;
     float recoverDuration_ = 0.f;
+    int touchCount_ = 0;
 };
 
 // One fish as a click can see it (F-09). `depth` is the fish's plane X, which is constant for the

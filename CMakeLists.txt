@@ -37,6 +37,7 @@ add_executable(rules_tests
   tests/test_obstacles.cpp
   tests/test_facing.cpp
   tests/test_audio.cpp
+  tests/test_reaction.cpp
 )
 target_link_libraries(rules_tests PRIVATE aquarium_rules Catch2::Catch2WithMain)
 
