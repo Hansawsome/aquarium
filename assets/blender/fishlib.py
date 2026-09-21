@@ -870,3 +870,70 @@ def scale_pattern_world(nt, cell_size, sharpness=1.0):
         if n.type == 'TEX_VORONOI' and n not in before:
             nt.links.new(geo.outputs["Position"], n.inputs["Vector"])
     return height, rough
+
+
+def ridge_pattern(nt, axis, period, sharpness=1.0):
+    """Banded ridges repeating every `period` cm along one world axis.
+
+    `axis` is 'X', 'Y' or 'Z'. Returns (height_socket, roughness_socket) in 0..1, exactly the
+    same contract as scale_pattern_world: feed the height into a Bump node and the roughness
+    into the Principled Roughness input. Ridge crests are smooth and the troughs are wider than
+    the crests (sharpness > 1 widens the troughs further), which is what a banded coral or a
+    ringed tube reads as. World position is used, so `period` really is centimetres."""
+    sep = position_axis(nt)
+    scale = nt.nodes.new("ShaderNodeMath"); scale.operation = 'MULTIPLY'
+    scale.inputs[1].default_value = 1.0 / max(1e-6, period)
+    nt.links.new(sep.outputs[axis], scale.inputs[0])
+    wave = nt.nodes.new("ShaderNodeMath"); wave.operation = 'SINE'
+    tau = nt.nodes.new("ShaderNodeMath"); tau.operation = 'MULTIPLY'
+    tau.inputs[1].default_value = 6.283185307179586
+    nt.links.new(scale.outputs[0], tau.inputs[0])
+    nt.links.new(tau.outputs[0], wave.inputs[0])
+    norm = nt.nodes.new("ShaderNodeMapRange")          # -1..1 -> 0..1
+    norm.inputs["From Min"].default_value = -1.0
+    norm.inputs["From Max"].default_value = 1.0
+    norm.clamp = True
+    nt.links.new(wave.outputs[0], norm.inputs["Value"])
+    sharp = nt.nodes.new("ShaderNodeMath"); sharp.operation = 'POWER'
+    sharp.inputs[1].default_value = max(0.05, sharpness)
+    nt.links.new(norm.outputs[0], sharp.inputs[0])
+    rough = nt.nodes.new("ShaderNodeMapRange")         # crests slicker, troughs duller
+    rough.inputs["To Min"].default_value = 0.75
+    rough.inputs["To Max"].default_value = 0.45
+    rough.clamp = True
+    nt.links.new(sharp.outputs[0], rough.inputs["Value"])
+    return sharp.outputs[0], rough.outputs[0]
+
+
+def radial_ridge_pattern(nt, period, sharpness=1.0):
+    """ridge_pattern driven by the XY radius from the object origin instead of one axis, so the
+    ridges form concentric rings. Plate corals grow in rings; a banded pattern along X on a disc
+    reads as corrugated cardboard instead. Same (height_socket, roughness_socket) contract."""
+    sep = position_axis(nt)
+    sx = nt.nodes.new("ShaderNodeMath"); sx.operation = 'MULTIPLY'
+    nt.links.new(sep.outputs["X"], sx.inputs[0]); nt.links.new(sep.outputs["X"], sx.inputs[1])
+    sy = nt.nodes.new("ShaderNodeMath"); sy.operation = 'MULTIPLY'
+    nt.links.new(sep.outputs["Y"], sy.inputs[0]); nt.links.new(sep.outputs["Y"], sy.inputs[1])
+    add = nt.nodes.new("ShaderNodeMath"); add.operation = 'ADD'
+    nt.links.new(sx.outputs[0], add.inputs[0]); nt.links.new(sy.outputs[0], add.inputs[1])
+    radius = nt.nodes.new("ShaderNodeMath"); radius.operation = 'SQRT'
+    nt.links.new(add.outputs[0], radius.inputs[0])
+    scale = nt.nodes.new("ShaderNodeMath"); scale.operation = 'MULTIPLY'
+    scale.inputs[1].default_value = 6.283185307179586 / max(1e-6, period)
+    nt.links.new(radius.outputs[0], scale.inputs[0])
+    wave = nt.nodes.new("ShaderNodeMath"); wave.operation = 'SINE'
+    nt.links.new(scale.outputs[0], wave.inputs[0])
+    norm = nt.nodes.new("ShaderNodeMapRange")
+    norm.inputs["From Min"].default_value = -1.0
+    norm.inputs["From Max"].default_value = 1.0
+    norm.clamp = True
+    nt.links.new(wave.outputs[0], norm.inputs["Value"])
+    sharp = nt.nodes.new("ShaderNodeMath"); sharp.operation = 'POWER'
+    sharp.inputs[1].default_value = max(0.05, sharpness)
+    nt.links.new(norm.outputs[0], sharp.inputs[0])
+    rough = nt.nodes.new("ShaderNodeMapRange")
+    rough.inputs["To Min"].default_value = 0.75
+    rough.inputs["To Max"].default_value = 0.45
+    rough.clamp = True
+    nt.links.new(sharp.outputs[0], rough.inputs["Value"])
+    return sharp.outputs[0], rough.outputs[0]
