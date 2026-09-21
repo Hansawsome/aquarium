@@ -83,6 +83,24 @@ TSharedRef<SWidget> UHudWidget::RebuildWidget()
 			MuteSlot->SetPosition(FVector2D(-kEdgeMargin - kMuteGap, kEdgeMargin));
 			MuteSlot->SetSize(FVector2D(kMuteSize, kMuteSize));
 		}
+
+		// 화면 구석의 숫자 하나. **왼쪽 아래**다 -- 나가기·뮤트가 오른쪽 위에 있고,
+		// 물고기가 가장 적게 지나가는 구석이다.
+		CountLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("CatchCount"));
+		CountLabel->SetFont(FUiFont::Get(30));
+		CountLabel->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.82f)));
+		CountLabel->SetShadowOffset(FVector2D(1.f, 1.f));
+		CountLabel->SetShadowColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.8f));
+		CountLabel->SetText(FText::FromString(TEXT("0")));
+		// 글자가 클릭을 먹으면 그 자리의 물고기를 놀래킬 수 없다(F-09).
+		CountLabel->SetVisibility(ESlateVisibility::HitTestInvisible);
+		if (UCanvasPanelSlot* CountSlot = Root->AddChildToCanvas(CountLabel))
+		{
+			CountSlot->SetAnchors(FAnchors(0.f, 1.f));
+			CountSlot->SetAlignment(FVector2D(0.f, 1.f));
+			CountSlot->SetPosition(FVector2D(kEdgeMargin, -kEdgeMargin));
+			CountSlot->SetAutoSize(true);
+		}
 	}
 	return Super::RebuildWidget();
 }
@@ -111,4 +129,24 @@ bool UHudWidget::IsPointerOverButton() const
 {
 	return (ExitButton != nullptr && ExitButton->IsHovered())
 		|| (MuteButton != nullptr && MuteButton->IsHovered());
+}
+
+void UHudWidget::SetCatchCount(int32 Count)
+{
+	if (CountLabel)
+	{
+		// FText::AsNumber는 로캘에 따라 천 단위 구분자를 넣는다. 최대 두 자리라
+		// 지금은 문제가 없지만, 테스트가 "8"을 기대하므로 로캘에 기대지 않는다.
+		CountLabel->SetText(FText::FromString(FString::FromInt(Count)));
+	}
+}
+
+FString UHudWidget::CountText() const
+{
+	return CountLabel ? CountLabel->GetText().ToString() : FString();
+}
+
+bool UHudWidget::CountIsHitTestable() const
+{
+	return CountLabel != nullptr && CountLabel->GetVisibility() == ESlateVisibility::Visible;
 }

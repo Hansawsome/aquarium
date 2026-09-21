@@ -30,6 +30,11 @@ public:
 	// 아이콘을 상태에 맞춰 바꾼다. 소유자가 뮤트를 토글한 뒤 부른다.
 	void SetMutedVisual(bool bInMuted);
 
+	// 잡은 수. 오르기만 한다 -- 내리는 경로가 이 클래스에 없다.
+	void SetCatchCount(int32 Count);
+	FString CountText() const;
+	bool CountIsHitTestable() const;
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
@@ -37,6 +42,7 @@ private:
 	UPROPERTY() TObjectPtr<UButton> ExitButton = nullptr;
 	UPROPERTY() TObjectPtr<UButton> MuteButton = nullptr;
 	UPROPERTY() TObjectPtr<class UImage> MuteImage = nullptr;
+	UPROPERTY() TObjectPtr<class UTextBlock> CountLabel = nullptr;
 	UPROPERTY() TObjectPtr<class UTexture2D> SoundOnTexture = nullptr;
 	UPROPERTY() TObjectPtr<class UTexture2D> SoundOffTexture = nullptr;
 	bool bMutedVisual = false;

@@ -15,6 +15,7 @@
 #include "Misc/Parse.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
+#include "CatchSubsystem.h"
 #include "FishActor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/Engine.h"
@@ -276,6 +277,14 @@ void ADiverPlayerController::Tick(float DeltaSeconds)
 	AdvanceAutoClick(DeltaSeconds);
 #endif
 	ApplyInputToPlayerFish(DeltaSeconds);
+	// 화면 구석의 숫자. 오르기만 하고, 내리는 경로가 HudWidget에 없다.
+	if (Hud)
+	{
+		if (UCatchSubsystem* CatchSub = GetWorld() ? GetWorld()->GetSubsystem<UCatchSubsystem>() : nullptr)
+		{
+			Hud->SetCatchCount(CatchSub->StampCount());
+		}
+	}
 #if !UE_BUILD_SHIPPING
 	// One UI-inclusive screenshot per tick: with -benchmark -fps=N the timestep is fixed, so the
 	// frame index maps to N frames per second. -dumpmovie cannot be used for this because the
