@@ -315,4 +315,70 @@ bool FFishActorPlayerStopsAtWall::RunTest(const FString&)
 	return true;
 }
 
+// Diagnoses (and, after Task 5, guards) the vertical-transition pirouette recorded since M2.
+//
+// The fish is driven by hand through a heading sweep that crosses straight up: up-and-right,
+// then straight up, then up-and-left. The facing frame is MakeFromXZ(Fwd, worldUp), whose local
+// Z flips sign the moment the lateral component of an almost vertical heading changes sign, so
+// the two frames differ by a 180 degree twist about the (almost vertical) forward axis.
+//
+// Twist is measured as the rotation about the forward axis, separated from the swing that aims
+// the nose -- the same decomposition StepSwim uses.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishActorNoLongTwistAcrossVertical, "Aquarium.Fish.FacingHasNoLongTwistAcrossVertical",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishActorNoLongTwistAcrossVertical::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnFish(World, 11u);
+	Fish->bPlayerControlled = true;   // drive the heading by hand, no wander in the way
+	Fish->PlaneHalfWidth = 400.f;
+	Fish->PlaneHalfHeight = 400.f;
+	Fish->InitializeSwim();
+
+	constexpr float Dt = 1.f / 60.f;
+	// Hold each direction long enough for the velocity to actually reach it.
+	const TArray<FVector2D> Legs = {FVector2D(0.35f, 1.f), FVector2D(0.f, 1.f), FVector2D(-0.35f, 1.f)};
+	float TotalTwistDeg = 0.f;
+	int TwistingSteps = 0;
+	float PeakTwistRate = 0.f;
+
+	Fish->SetInputDirection(Legs[0]);
+	for (int i = 0; i < 90; ++i) Fish->StepSwim(Dt);   // settle onto the first heading
+
+	FQuat Prev = Fish->GetActorQuat();
+	for (int Leg = 1; Leg < Legs.Num(); ++Leg)
+	{
+		Fish->SetInputDirection(Legs[Leg]);
+		for (int i = 0; i < 120; ++i)
+		{
+			Fish->StepSwim(Dt);
+			const FQuat Now = Fish->GetActorQuat();
+			// Swing takes Prev's forward to Now's forward; whatever is left is twist.
+			const FQuat Swing = FQuat::FindBetweenNormals(Prev.GetAxisX(), Now.GetAxisX());
+			FQuat Twist = Now * (Swing * Prev).Inverse();
+			Twist.Normalize();
+			if (Twist.W < 0.f) Twist = FQuat(-Twist.X, -Twist.Y, -Twist.Z, -Twist.W);
+			FVector Axis; float AngleRad;
+			Twist.ToAxisAndAngle(Axis, AngleRad);
+			const float StepTwistDeg = FMath::RadiansToDegrees(AngleRad);
+			if (StepTwistDeg > 0.5f)
+			{
+				TotalTwistDeg += StepTwistDeg;
+				++TwistingSteps;
+				PeakTwistRate = FMath::Max(PeakTwistRate, StepTwistDeg / Dt);
+			}
+			Prev = Now;
+		}
+	}
+
+	// The flip itself is unavoidable, so this does NOT assert that no twist happens. It asserts
+	// that the twist never drags on: at the steep rate 180 degrees fits in 0.07 s, which is 5
+	// steps at 60 fps. The defect took 0.33 s, i.e. 20 steps.
+	const float ElapsedSec = static_cast<float>(TwistingSteps) * Dt;
+	AddInfo(FString::Printf(TEXT("twist total %.1f deg over %d steps (%.3f s), peak %.0f deg/s"),
+		TotalTwistDeg, TwistingSteps, ElapsedSec, PeakTwistRate));
+	return TestTrue(FString::Printf(TEXT("twist across vertical took %.3f s (limit 0.12 s), total %.1f deg"), ElapsedSec, TotalTwistDeg),
+		ElapsedSec < 0.12f);
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
