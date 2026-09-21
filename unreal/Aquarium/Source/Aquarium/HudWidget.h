@@ -16,6 +16,10 @@ public:
 	// Fired on every click; the owner ends the session and swaps back to the entry screen.
 	FSimpleDelegate OnExit;
 
+	// True while the cursor is over the exit button. Used by the click handler so a click the
+	// button is taking does not also startle a fish behind it (F-09).
+	bool IsPointerOverExitButton() const;
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 

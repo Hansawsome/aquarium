@@ -42,6 +42,13 @@ public:
 	// session and drives the new fish hard right from frame one with no key actually held.
 	void ResetArrowKeys();
 
+	// F-09. Applies one click, given as a world ray, to the frontmost fish it passes through.
+	// Returns true when a fish was actually startled. Public so automation can drive the whole
+	// click path without a viewport: -nullrhi has no game viewport, so deprojection (the ONLY
+	// step this skips) cannot be exercised headlessly and is covered by the click-log CSV of a
+	// real run instead.
+	bool HandleClickRay(const FVector& RayOrigin, const FVector& RayDir);
+
 	// Maps a BeginSession verdict to the entry-screen error. Pure, so it is testable headless.
 	static EEntryError EntryErrorFor(EBeginSessionResult Result, const FString& Raw);
 	// Parses -AquariumAutoNickname=<name> [-AquariumAutoExitAfter=<sec>]; false when no nickname given.
@@ -88,6 +95,12 @@ private:
 	// Window focus gained/lost: releases every held key and pauses/resumes the player fish (F-06).
 	void HandleApplicationActivationChanged(bool bIsActive);
 	void ApplyInputToPlayerFish(float DeltaSeconds);
+	// Bound to the left mouse button (IE_Pressed only -- see the .cpp). Reads the cursor,
+	// deprojects it once, and forwards to HandleClickRay.
+	void HandleClick();
+	// One click at a viewport position in PIXELS. Both the real mouse and the dev-only scripted
+	// clicks go through here, so the capture path and the play path are the same code.
+	bool HandleClickAt(const FVector2D& ViewportPos);
 	void StartAutoInputIfRequested();
 	AAquariumGameMode* GameMode() const;
 	void StartAutoReplayIfRequested();

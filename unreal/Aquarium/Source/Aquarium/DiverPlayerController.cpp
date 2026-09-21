@@ -1,4 +1,6 @@
 #include "DiverPlayerController.h"
+
+#include "FishSchoolSubsystem.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
 #include "Components/InputComponent.h"
@@ -124,6 +126,61 @@ void ADiverPlayerController::ApplyInputToPlayerFish(float DeltaSeconds)
 	Fish->SetInputDirection(DirectionFor(ArrowKeys));
 }
 
+void ADiverPlayerController::HandleClick()
+{
+	// The HUD exit button sits on top of the scene; a click that the button is taking must not
+	// also startle whatever fish happens to be behind it. Slate handles the button itself, but
+	// under FInputModeGameAndUI the key still reaches us, so this guard is ours to make.
+	if (Hud && Hud->IsPointerOverExitButton())
+	{
+		return;
+	}
+	float X = 0.f, Y = 0.f;
+	if (!GetMousePosition(X, Y))
+	{
+		return;
+	}
+	HandleClickAt(FVector2D(X, Y));
+}
+
+bool ADiverPlayerController::HandleClickAt(const FVector2D& ViewportPos)
+{
+	// The ONE place the engine's projection maths is used. Writing a closed-form screen -> plane
+	// formula here would mean copying the FOV, aspect and near plane into a second place, which
+	// is the duplicated-rule trap that hid the prop lane bug until M4b.
+	FVector WorldOrigin = FVector::ZeroVector;
+	FVector WorldDir = FVector::ZeroVector;
+	if (!DeprojectScreenPositionToWorld(static_cast<float>(ViewportPos.X), static_cast<float>(ViewportPos.Y),
+	                                    WorldOrigin, WorldDir))
+	{
+		return false;
+	}
+	return HandleClickRay(WorldOrigin, WorldDir);
+}
+
+bool ADiverPlayerController::HandleClickRay(const FVector& RayOrigin, const FVector& RayDir)
+{
+	AAquariumGameMode* GM = GameMode();
+	if (GM == nullptr || !GM->HasActiveSession())
+	{
+		return false;   // the entry screen is up; clicking the nickname box startles nobody
+	}
+	UWorld* W = GetWorld();
+	UFishSchoolSubsystem* School = W ? W->GetSubsystem<UFishSchoolSubsystem>() : nullptr;
+	if (School == nullptr)
+	{
+		return false;
+	}
+	FVector Hit = FVector::ZeroVector;
+	AFishActor* Fish = School->PickFrontmostHit(RayOrigin, RayDir, Hit);
+	if (Fish == nullptr)
+	{
+		return false;   // F-09: empty water affects nothing
+	}
+	Fish->ApplyFleeFrom(Hit);   // exactly one fish per click
+	return true;
+}
+
 void ADiverPlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -183,6 +240,10 @@ void ADiverPlayerController::SetupInputComponent()
 		InputComponent->BindKey(EKeys::Left, IE_Released, this, &ADiverPlayerController::ReleaseLeft);
 		InputComponent->BindKey(EKeys::Right, IE_Pressed, this, &ADiverPlayerController::PressRight);
 		InputComponent->BindKey(EKeys::Right, IE_Released, this, &ADiverPlayerController::ReleaseRight);
+		// F-09. IE_Pressed ONLY. macOS delivers BOTH IE_Pressed and IE_DoubleClick for the second
+		// click of a fast double click, so binding the double click as well would make one
+		// physical click of a mashing child count twice.
+		InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ADiverPlayerController::HandleClick);
 	}
 }
 
