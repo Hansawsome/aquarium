@@ -21,7 +21,13 @@
 - [개발 환경 확인 결과](docs/ENVIRONMENT.md)
 - [설치 및 MCP 연결 상태](docs/SETUP.md)
 - [에셋 출처 기록](docs/ASSETS.md)
+- [프로젝트 마감 요약 (M6) — 테스트 집계·SRS 공식 성능 판정·사용자 수동 확인 5항목](docs/reviews/2026-09-21-m6-summary.md)
 - [개발 에이전트 지침](AGENTS.md)
+
+## 에셋 출처
+
+이 게임은 Noto Sans KR(SIL OFL 1.1)과 Poly Haven CC0 에셋(모래 텍스처 `coast_sand_01`, 바위 `boulder_01`/`rock_07`/`rock_09`)을 사용합니다.
+OFL 1.1 전문은 패키지의 `Aquarium.app/Contents/UE/Aquarium/Content/Licenses/OFL-NotoSansKR.txt`와 저장소 `assets/fonts/OFL.txt`에 있고, 전체 출처 기록은 [`docs/ASSETS.md`](docs/ASSETS.md)에 있습니다.
 
 ## 방향
 

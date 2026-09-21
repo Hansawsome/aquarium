@@ -1,0 +1,11 @@
+AquariumAssignmentSeed
+AquariumAutoClick
+AquariumAutoExitAfter
+AquariumAutoInput
+AquariumAutoNickname
+AquariumCaptureUI
+AquariumClickLog
+AquariumFrameStats
+AquariumNoFlee
+AquariumNoPropAvoid
+AquariumNoSchooling
