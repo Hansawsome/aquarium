@@ -21,6 +21,7 @@
 - [개발 환경 확인 결과](docs/ENVIRONMENT.md)
 - [설치 및 MCP 연결 상태](docs/SETUP.md)
 - [에셋 출처 기록](docs/ASSETS.md)
+- [프로젝트 마감 요약 (M6) — 테스트 집계·SRS 공식 성능 판정·사용자 수동 확인 5항목](docs/reviews/2026-09-21-m6-summary.md)
 - [개발 에이전트 지침](AGENTS.md)
 
 ## 에셋 출처
