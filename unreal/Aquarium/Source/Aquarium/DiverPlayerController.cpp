@@ -1,5 +1,7 @@
 #include "DiverPlayerController.h"
 
+#include "AquariumAudioSubsystem.h"
+
 #include "FishSchoolSubsystem.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
@@ -128,6 +130,15 @@ void ADiverPlayerController::ApplyInputToPlayerFish(float DeltaSeconds)
 		return;
 	}
 	Fish->SetInputDirection(DirectionFor(ArrowKeys));
+	// 장면 1: 방향키를 누르는 순간 물살 소리가 나고, 빠를수록 음이 올라간다.
+	// 소리 규칙 자체는 규칙 계층에 있고, 여기서는 속도를 건네줄 뿐이다.
+	if (UWorld* W = GetWorld())
+	{
+		if (UAquariumAudioSubsystem* Audio = W->GetSubsystem<UAquariumAudioSubsystem>())
+		{
+			Audio->UpdateSwim(Fish->CurrentSpeed(), Fish->MaxSpeed, DeltaSeconds);
+		}
+	}
 }
 
 void ADiverPlayerController::HandleClick()
