@@ -156,7 +156,7 @@ UE="/Users/Shared/Epic Games/UE_5.8"
 "$UE/Engine/Build/BatchFiles/Mac/Build.sh" AquariumEditor Mac Development -Project="$PWD/unreal/Aquarium/Aquarium.uproject" -WaitMutex
 
 # 4. FBX 임포트(다섯 종 + 소품) → 장면 생성 → 검증 (각각 에디터 부팅 약 1분; 종료 코드 대신 IMPORT_OK/REEF_OK/SCENE_OK 확인)
-for s in import_fish.py import_props.py build_reef_m1.py verify_scene.py; do
+for s in import_fish.py import_props.py import_audio.py build_reef_m1.py verify_scene.py; do
   "$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/unreal/Aquarium/Aquarium.uproject" -run=pythonscript -script="$PWD/unreal/Aquarium/Scripts/$s" -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput 2>&1 | grep -E "_OK|Traceback"
 done
 
