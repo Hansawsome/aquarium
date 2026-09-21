@@ -23,6 +23,11 @@
 - [에셋 출처 기록](docs/ASSETS.md)
 - [개발 에이전트 지침](AGENTS.md)
 
+## 에셋 출처
+
+이 게임은 Noto Sans KR(SIL OFL 1.1)과 Poly Haven CC0 에셋(모래 텍스처 `coast_sand_01`, 바위 `boulder_01`/`rock_07`/`rock_09`)을 사용합니다.
+OFL 1.1 전문은 패키지의 `Aquarium.app/Contents/UE/Aquarium/Content/Licenses/OFL-NotoSansKR.txt`와 저장소 `assets/fonts/OFL.txt`에 있고, 전체 출처 기록은 [`docs/ASSETS.md`](docs/ASSETS.md)에 있습니다.
+
 ## 방향
 
 Unreal Engine 5 + Blueprint를 중심으로 구성하고, 테스트할 게임 규칙은 C++로 분리합니다. Blender로 무료 에셋을 수정하거나 필요한 모델과 애니메이션을 제작합니다. macOS 단일 플랫폼이 출시 대상입니다. 태블릿 배포는 2026-09-20 논의로 범위에서 제외했습니다.
