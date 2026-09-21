@@ -56,3 +56,47 @@ TEST_CASE("player input suppressed while fleeing, restored from recovery (F-12)"
     m.Step(0.8f);                                                     // Recovering
     REQUIRE(m.EffectiveInput(player).y == Approx(1.f));               // player again
 }
+
+TEST_CASE("flee direction is never a zero vector (F-10)") {
+    // Dead-centre touch, stationary fish, AND a degenerate fallback: this happens when a fish
+    // sits exactly at its plane centre (so "toward screen centre" is also zero) and the child
+    // clicks it. Returning {0,0} here would make StepMotion decelerate -- the fish would be
+    // startled into stopping.
+    const Vec2 d = ComputeFleeDirection({20.f, 50.f}, {20.f, 50.f}, {0.f, 0.f}, {0.f, 0.f});
+    REQUIRE(d.Length() == Approx(1.f));
+}
+
+TEST_CASE("speed scale is 1 while normal (F-10)") {
+    FleeStateMachine m;
+    REQUIRE(m.SpeedScale(kP) == Approx(1.f));
+}
+
+TEST_CASE("speed scale bursts while fleeing (F-10)") {
+    FleeStateMachine m;
+    m.Touch({0.f, 0.f}, {10.f, 0.f}, {0.f, 0.f}, {0.f, 1.f}, kP);
+    REQUIRE(m.SpeedScale(kP) == Approx(kP.fleeSpeedScale));
+    m.Step(0.4f);
+    REQUIRE(m.SpeedScale(kP) == Approx(kP.fleeSpeedScale));   // flat for the whole flee
+}
+
+TEST_CASE("speed scale ramps back to 1 across recovery (F-10)") {
+    FleeStateMachine m;
+    m.Touch({0.f, 0.f}, {10.f, 0.f}, {0.f, 0.f}, {0.f, 1.f}, kP);
+    m.Step(0.8f);                                   // -> Recovering, full 1.2 s left
+    REQUIRE(m.State() == BehaviorState::Recovering);
+    REQUIRE(m.SpeedScale(kP) == Approx(kP.fleeSpeedScale));
+    m.Step(0.6f);                                   // half way through recovery
+    const float mid = m.SpeedScale(kP);
+    REQUIRE(mid == Approx(1.f + (kP.fleeSpeedScale - 1.f) * 0.5f).margin(1e-3f));
+    m.Step(0.6f);                                   // -> Normal
+    REQUIRE(m.State() == BehaviorState::Normal);
+    REQUIRE(m.SpeedScale(kP) == Approx(1.f));
+}
+
+TEST_CASE("one huge step lands in Normal, not stuck in Recovering (F-11)") {
+    FleeStateMachine m;
+    m.Touch({0.f, 0.f}, {10.f, 0.f}, {0.f, 0.f}, {0.f, 1.f}, kP);
+    m.Step(5.f);                                    // longer than flee + recover together
+    REQUIRE(m.State() == BehaviorState::Normal);
+    REQUIRE(m.SpeedScale(kP) == Approx(1.f));
+}
