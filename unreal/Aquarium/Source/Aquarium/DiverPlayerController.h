@@ -88,6 +88,9 @@ public:
 	// 자동화가 여기서 시작해야 한다.
 	void HandleDashPressed();
 
+	// 테스트 진입점. Tick에서 부르는 것과 같은 함수다.
+	void TickCameraShakeForTest(float DeltaSeconds) { ApplyCameraShake(DeltaSeconds); }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -126,6 +129,17 @@ private:
 	bool HandleClickAt(const FVector2D& ViewportPos);
 	void StartAutoInputIfRequested();
 	AAquariumGameMode* GameMode() const;
+	// 흔들리기 전의 카메라 자리. 오프셋을 **더했다 빼는** 것이 아니라 언제나
+	// 기준 + 오프셋으로 다시 놓는다. 누적 오차가 남으면 카메라가 한 판 내내
+	// 조금씩 흘러가고, 그것은 P-06(카메라는 물고기를 따라가지 않는다) 위반이다.
+	FVector CameraBaseLocation = FVector::ZeroVector;
+	bool bHasCameraBase = false;
+	UPROPERTY() TObjectPtr<class ACameraActor> ShakeCamera = nullptr;
+	UPROPERTY() TObjectPtr<class UMaterialInstanceDynamic> DisplacementMid = nullptr;
+	bool bDisplacementInstalled = false;
+	// BeginPlay가 돌지 않은 월드(자동화)에서도 동작하도록 **게으르게** 찾는다.
+	void EnsureShakeCamera();
+	void ApplyCameraShake(float DeltaSeconds);
 	// 그 깊이에서 기포가 사라지는 월드 Z. 화면 위 끝에서 파생한다.
 	float BubbleTopZAt(float DepthCm);
 	void StartAutoReplayIfRequested();

@@ -40,12 +40,41 @@ public:
 
 	AInstancedFieldActor* Field() const { return FieldActor; }
 
+	// 빠르게 지나간 자리에 남는 하얀 자국. **위로 뜨지 않는다.** 기포와 반대인 것이
+	// 요점이다 -- 뜨면 그것은 시나리오가 이름 붙여 금지한 '귀여운 방울'이 된다.
+	// 기포는 화면 위를 넘어야만 사라지고, 자국은 제 수명으로 그 자리에서 사라진다.
+	void SpawnWake(const FVector& WorldPoint, const FVector2D& HeadingShared, uint32 Seed);
+	int32 ActiveWakeCount() const { return static_cast<int32>(Wakes.size()); }
+	int32 WakeSpawnedTotal() const { return WakeSpawnedTotalValue; }
+	float HighestWakeZ() const;
+	// 내 물고기가 이 속도 비율을 넘으면 자국을 남긴다. 최대 속도에서 **파생**한다 --
+	// 리터럴 cm/s를 적으면 최대 속도를 조정할 때 조용히 어긋난다.
+	float WakeSpeedFraction = 0.55f;
+	float WakeInterval = 0.06f;    // 초. 자국 하나 사이의 간격
+	float WakeLifetime = 0.5f;     // 초. 시간으로 사라지는 유일한 것이다
+	AInstancedFieldActor* WakeField() const { return WakeFieldActor; }
+
 private:
 	std::vector<aquarium::Bubble> Bubbles;
 	aquarium::BubbleParams BubbleParamsValue;
 	UPROPERTY() TObjectPtr<AInstancedFieldActor> FieldActor = nullptr;
 	float TopZValue = 400.f;
 	int32 SpawnedTotalValue = 0;
+	// 난류 자국 하나. 기포와 달리 뜨지 않으므로 riseSpeed가 없고, 대신 수명이 있다.
+	struct FWake
+	{
+		FVector Location = FVector::ZeroVector;
+		FVector2D Heading = FVector2D(1.f, 0.f);   // 공유 프레임
+		float Age = 0.f;
+		float Size = 0.f;
+	};
+	std::vector<FWake> Wakes;
+	UPROPERTY() TObjectPtr<AInstancedFieldActor> WakeFieldActor = nullptr;
+	int32 WakeSpawnedTotalValue = 0;
+	float WakeTimer = 0.f;
+	uint32 NextWakeSeed = 1u;
+	void EnsureWakeField();
+	void TickWakes(float DeltaTime);
 	uint32 NextSeed = 1u;
 	void EnsureField();
 };

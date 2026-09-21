@@ -15,6 +15,9 @@
 #include "Misc/Parse.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
+#include "Camera/CameraComponent.h"
 #include "CatchSubsystem.h"
 #include "FishActor.h"
 #include "Framework/Application/SlateApplication.h"
@@ -277,6 +280,7 @@ void ADiverPlayerController::Tick(float DeltaSeconds)
 	AdvanceAutoClick(DeltaSeconds);
 #endif
 	ApplyInputToPlayerFish(DeltaSeconds);
+	ApplyCameraShake(DeltaSeconds);
 	// 화면 구석의 숫자. 오르기만 하고, 내리는 경로가 HudWidget에 없다.
 	if (Hud)
 	{
@@ -455,6 +459,62 @@ void ADiverPlayerController::HandleDashPressed()
 		{
 			Fish->PressDash();
 		}
+	}
+}
+
+void ADiverPlayerController::EnsureShakeCamera()
+{
+	if (ShakeCamera == nullptr)
+	{
+		TArray<AActor*> Cameras;
+		UGameplayStatics::GetAllActorsOfClassWithTag(GetWorld(), ACameraActor::StaticClass(),
+			FName(TEXT("DiverCamera")), Cameras);
+		if (Cameras.Num() > 0)
+		{
+			ShakeCamera = Cast<ACameraActor>(Cameras[0]);
+		}
+	}
+	if (ShakeCamera == nullptr || bDisplacementInstalled) return;
+	// 물 밀림 왜곡은 **카메라 컴포넌트의 블렌더블**이다. 레벨에 PostProcessVolume을
+	// 넣으면 ReefM1.umap이 바뀌어 verify_scene.py의 기대값이 흔들린다.
+	if (UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Fx/M_WaterPush.M_WaterPush")))
+	{
+		DisplacementMid = UMaterialInstanceDynamic::Create(Base, this);
+		if (DisplacementMid)
+		{
+			DisplacementMid->SetScalarParameterValue(TEXT("Strength"), 0.f);
+			if (UCameraComponent* Cc = ShakeCamera->GetCameraComponent())
+			{
+				// 블렌더블은 **한 번만** 넣는다. 매 틱 AddBlendable을 부르면 배열이 자란다.
+				Cc->PostProcessSettings.AddBlendable(DisplacementMid, 1.f);
+				Cc->PostProcessBlendWeight = 1.f;
+			}
+		}
+	}
+	bDisplacementInstalled = true;
+}
+
+void ADiverPlayerController::ApplyCameraShake(float DeltaSeconds)
+{
+	UWorld* W = GetWorld();
+	UCatchSubsystem* CatchSub = W ? W->GetSubsystem<UCatchSubsystem>() : nullptr;
+	if (CatchSub == nullptr) return;
+	EnsureShakeCamera();
+	if (ShakeCamera == nullptr) return;
+	if (!bHasCameraBase)
+	{
+		CameraBaseLocation = ShakeCamera->GetActorLocation();
+		bHasCameraBase = true;
+	}
+	const aquarium::ShakeOffset O = CatchSub->Shake().Offset(CatchSub->ShakeParams());
+	// 언제나 기준 + 오프셋이다. 누적하지 않으므로 흔들림이 끝나면 **정확히** 제자리다.
+	ShakeCamera->SetActorLocation(CameraBaseLocation + FVector(0.f, O.y, O.z));
+
+	if (DisplacementMid)
+	{
+		// 같은 수명을 따르되 진동하지 않는다. 깜빡이면 화면이 지글거린다.
+		DisplacementMid->SetScalarParameterValue(TEXT("Strength"),
+			CatchSub->Shake().DisplacementWeight(CatchSub->ShakeParams()));
 	}
 }
 

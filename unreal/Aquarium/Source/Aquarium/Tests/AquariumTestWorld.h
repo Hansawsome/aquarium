@@ -10,6 +10,7 @@
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
 
 #include "AquariumGameMode.h"
+#include "Camera/CameraActor.h"
 #include "DiverPlayerController.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
@@ -74,6 +75,18 @@ inline AFishActor* SpawnBackgroundFish(UWorld* World, uint32 Seed, float PlaneX 
 	}
 	Fish->InitializeSwim();
 	return Fish;
+}
+
+// DiverCamera 태그가 붙은 카메라. 컨트롤러와 잡기 서브시스템이 둘 다 이 태그로
+// 찾으므로, 이것이 없으면 두 쪽 다 "카메라 없음" 경로로 빠져 테스트가 아무것도
+// 검증하지 않게 된다.
+inline class ACameraActor* SpawnDiverCamera(UWorld* World, const FVector& At = FVector(-400.f, 0.f, 120.f))
+{
+	FActorSpawnParameters P;
+	P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ACameraActor* Cam = World->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), At, FRotator::ZeroRotator, P);
+	Cam->Tags.Add(FName(TEXT("DiverCamera")));
+	return Cam;
 }
 
 } // namespace AquariumTest
