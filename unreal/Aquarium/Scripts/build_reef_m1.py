@@ -93,6 +93,11 @@ SUN_ROT = (-65.0, 30.0)                 # pitch, yaw
 SUN_INTENSITY = 14.0                   # light function peaks at 1.0, so the sun carries brightness
 SUN_COLOR = dict(r=0.55, g=0.85, b=1.0)
 SUN_VOLUMETRIC_SCATTERING = 14.0        # shafts need scattering AND an occluder (SurfaceGobo)
+# A masked occluder gives a binary shadow, so the ONLY way to soften the gobo pattern's edges on
+# the sand is the light's own penumbra. Source angle is the sun's angular diameter in degrees;
+# the gobo sits ~11 m above the floor, so 4 deg spreads each edge over roughly 11 m * tan(4 deg)
+# ~= 77 cm. Real sunlight through a water surface is diffused exactly this way.
+SUN_SOURCE_ANGLE = 7.0
 
 SKY_INTENSITY = 0.8
 SKY_COLOR = dict(r=0.35, g=0.65, b=0.9)
@@ -118,7 +123,15 @@ FOG_VOLUMETRIC_DISTANCE = 6000.0
 # cast a shadow at all -- which is why "빛줄기 약함" survived every intensity increase in M1.
 GOBO_Z = 1100.0
 GOBO_SCALE = 60.0                       # 100 cm plane -> 60 m, wider than the 40 m floor
-GOBO_THRESHOLD = 0.42                   # opacity-mask cutoff; higher = narrower, sharper shafts
+GOBO_THRESHOLD = 0.56                   # opacity-mask cutoff; higher = narrower, sharper shafts
+# Ripple cell size relative to the floor caustics periods (52..89 cm). The first M4b pass used
+# 3.0 -- three times COARSER than the floor pattern -- and the result on the sand was a handful
+# of hard-edged puddles several metres across that read as an oil slick, not as water. 0.7 makes
+# the gobo cells slightly FINER than the floor caustics, so many ripples cross the visible floor
+# and the two patterns read as coming from the same water surface.
+GOBO_PERIOD_SCALE = 0.9
+GOBO_EDGE_GAIN = 2.5                    # mask ramp; the blend mode still clips, so this only
+                                        # shifts where the edge lands, not how soft it is
 
 # Post-process. Auto exposure is already off project-wide (r.DefaultFeature.AutoExposure=False),
 # so these are absolute. Lowering the fog costs contrast; the grade puts it back.
@@ -358,30 +371,39 @@ def build_surface_gobo(m):
     px = mask(wpos, -1800, -100, True, False)
     py = mask(wpos, -1800, 100, False, True)
     t = node(unreal.MaterialExpressionTime, -1800, 300)
+    # All four caustic waves, each phase-warped by the previous one exactly as build_caustics
+    # does. Three unwarped sines at a fine period tile into a regular polka-dot lattice on the
+    # sand; the warp is what turns that lattice into irregular, organic ripples.
+    warp_turns = CAUSTIC_WARP / (2.0 * math.pi)
+    prev = None
     waves = []
-    for i, (period, angle, drift) in enumerate(CAUSTIC_WAVES[:3]):
+    for i, (period, angle, drift) in enumerate(CAUSTIC_WAVES):
         y = -450 + i * 220
-        kx = math.cos(math.radians(angle)) / (period * 3.0)   # 3x coarser than the floor pattern
-        ky = math.sin(math.radians(angle)) / (period * 3.0)
+        kx = math.cos(math.radians(angle)) / (period * GOBO_PERIOD_SCALE)
+        ky = math.sin(math.radians(angle)) / (period * GOBO_PERIOD_SCALE)
         ax = mul(px, const(-1600, y - 60, kx), -1450, y - 60)
         ay = mul(py, const(-1600, y, ky), -1450, y)
         at = mul(t, const(-1600, y + 60, drift * 0.5), -1450, y + 60)
-        waves.append(sine(add(add(ax, ay, -1300, y), at, -1150, y), -700, y))
+        phase = add(add(ax, ay, -1300, y), at, -1150, y)
+        if prev is not None:
+            phase = add(phase, mul(prev, const(-1150, y + 90, warp_turns), -1000, y + 60), -850, y)
+        prev = sine(phase, -700, y)
+        waves.append(prev)
     s = waves[0]
     for i, w in enumerate(waves[1:]):
         s = add(s, w, -550 + i * 100, -100)
     n_waves = float(len(waves))
     norm = add(mul(s, const(-250, 100, 1.0 / (2.0 * n_waves)), -150, -100),
                const(-150, 100, 0.5), -50, -100)
-    # opacity mask = saturate((norm - threshold) * 8): a hard-ish edge so the shafts have edges
-    off = node(unreal.MaterialExpressionSubtract, 50, -100)
+    # opacity mask = saturate((norm - threshold) * GOBO_EDGE_GAIN)
+    off = node(unreal.MaterialExpressionSubtract, 550, -100)
     mel.connect_material_expressions(norm, "", off, "A")
-    mel.connect_material_expressions(const(50, 100, GOBO_THRESHOLD), "", off, "B")
-    gain = mul(off, const(200, 100, 8.0), 300, -100)
-    sat = node(unreal.MaterialExpressionSaturate, 450, -100)
+    mel.connect_material_expressions(const(550, 100, GOBO_THRESHOLD), "", off, "B")
+    gain = mul(off, const(700, 100, GOBO_EDGE_GAIN), 800, -100)
+    sat = node(unreal.MaterialExpressionSaturate, 950, -100)
     mel.connect_material_expressions(gain, "", sat, "")
     mel.connect_material_property(sat, "", unreal.MaterialProperty.MP_OPACITY_MASK)
-    mel.connect_material_property(const(450, 200, 0.0), "",
+    mel.connect_material_property(const(950, 200, 0.0), "",
                                   unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
@@ -432,6 +454,7 @@ sc.set_mobility(unreal.ComponentMobility.MOVABLE)   # light function + volumetri
 sc.set_intensity(SUN_INTENSITY)
 sc.set_light_color(unreal.LinearColor(**SUN_COLOR))
 sc.set_editor_property("volumetric_scattering_intensity", SUN_VOLUMETRIC_SCATTERING)
+sc.set_editor_property("light_source_angle", SUN_SOURCE_ANGLE)
 sc.set_editor_property("light_function_material", m_caus)   # graph reads WorldPosition; scale is irrelevant
 sc.set_editor_property("cast_volumetric_shadow", True)
 
