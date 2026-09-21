@@ -52,28 +52,38 @@ SCHOOL_SCALE = (0.75, 1.3)
 SCHOOL_SPEED = (25.0, 55.0)
 
 PROP_SEED = 77
-PROP_COUNT = 14
+PROP_COUNT = 22
 # (mesh path, scale range) — rock_09 is a 15 cm pebble, so it is scaled up a lot
 PROP_MESHES = [
     ("/Game/Props/SM_BranchCoral", (0.7, 1.4)),
     ("/Game/Props/SM_PlateCoral",  (0.6, 1.2)),
     ("/Game/Props/SM_BrainCoral",  (0.7, 1.4)),
+    ("/Game/Props/SM_FanCoral",    (0.7, 1.5)),
+    ("/Game/Props/SM_TubeCoral",   (0.8, 1.6)),
     ("/Game/Props/SM_boulder_01",  (0.8, 1.5)),
     ("/Game/Props/SM_rock_07",     (2.0, 4.0)),
     ("/Game/Props/SM_rock_09",     (4.0, 8.0)),
 ]
-# Unscaled XY half-extents (cm) from the import log; the placement radius is
-# max(x, y) * actor scale.
+# Unscaled XY half-extents (cm) read from the import_props.py PROPS_OK log, not guessed; the
+# placement radius is max(x, y) * actor scale.
 PROP_HALF_EXTENTS = {
     "SM_BranchCoral": (28.3, 22.2),
     "SM_PlateCoral":  (52.6, 52.8),
     "SM_BrainCoral":  (31.4, 31.4),
+    "SM_FanCoral":    (27.6, 3.4),
+    "SM_TubeCoral":   (19.2, 22.5),
     "SM_boulder_01":  (63.6, 91.5),
     "SM_rock_07":     (8.4, 16.0),
     "SM_rock_09":     (3.7, 7.2),
 }
-PROP_X = (150.0, 800.0)
-PROP_Y = (-400.0, 400.0)
+PROP_X = (150.0, 900.0)
+PROP_Y = (-450.0, 450.0)
+# Per-instance variation on top of the existing random yaw: a small tilt, a non-uniform Z
+# stretch and one of the tint material instances. Without these, eight meshes across 22 props
+# read as stamped copies no matter how good each mesh is.
+PROP_TILT_DEG = 7.0
+PROP_Z_STRETCH = (0.85, 1.20)
+PROP_TINT_COUNT = {"coral": 3, "rock": 2}
 PROP_SEPARATION = 0.9          # required gap as a fraction of the summed radii
 PROP_SEPARATION_RELAXED = 0.75 # fallback when a prop cannot be placed
 PROP_PLACE_TRIES = 200
@@ -777,14 +787,28 @@ for i, (mesh_path, scale_range) in enumerate(mesh_order):
     x, y, scale, radius = chosen
     placed.append((x, y, radius))
     yaw = prng.uniform(0.0, 360.0)
-    prop = spawn(unreal.StaticMeshActor, (x, y, FLOOR_Z), (0.0, yaw),
-                 label="Prop_%02d_%s" % (i, name))
+    pitch = prng.uniform(-PROP_TILT_DEG, PROP_TILT_DEG)
+    roll = prng.uniform(-PROP_TILT_DEG, PROP_TILT_DEG)
+    z_stretch = prng.uniform(*PROP_Z_STRETCH)
+    kind = "rock" if name.startswith("SM_rock") or name.startswith("SM_boulder") else "coral"
+    tint_index = prng.randrange(PROP_TINT_COUNT[kind])
+    mi_path = "/Game/Props/MI_%s_v%d" % (name[len("SM_"):], tint_index)
+
+    # spawn() takes no roll, so this one call goes straight to the subsystem.
+    prop = eas.spawn_actor_from_class(
+        unreal.StaticMeshActor, unreal.Vector(x, y, FLOOR_Z),
+        unreal.Rotator(roll=roll, pitch=pitch, yaw=yaw))
+    assert prop is not None, "prop spawn failed: %s" % mesh_path
+    prop.set_actor_label("Prop_%02d_%s" % (i, name))
     pc = prop.static_mesh_component
     pc.set_mobility(unreal.ComponentMobility.STATIC)
     sm = unreal.load_asset(mesh_path)
     assert isinstance(sm, unreal.StaticMesh), "prop mesh missing: %s" % mesh_path
     assert pc.set_static_mesh(sm), "failed to set prop mesh: %s" % mesh_path
-    prop.set_actor_scale3d(unreal.Vector(scale, scale, scale))
+    mi = unreal.load_asset(mi_path)
+    assert isinstance(mi, unreal.MaterialInstanceConstant), "prop tint missing: %s" % mi_path
+    pc.set_material(0, mi)
+    prop.set_actor_scale3d(unreal.Vector(scale, scale, scale * z_stretch))
     prop_count += 1
 
 assert les.save_current_level(), "save_current_level failed"

@@ -15,12 +15,14 @@ SNOW_CURTAIN_TAGS = ("near", "mid", "far")
 SCHOOL_COUNT = 36
 SCHOOL_SPECIES_MIN = 5
 SCHOOL_SCALE = (0.75, 1.3)
-PROP_COUNT = 14
+PROP_COUNT = 22
 PROP_CLEAR_RADIUS_Y = 60.0
 PROP_CLEAR_TAPER = 0.10
 PROP_CLEAR_NEAR_X = 150.0
-PROP_MESH_NAMES = {"SM_BranchCoral", "SM_PlateCoral", "SM_BrainCoral",
-                   "SM_boulder_01", "SM_rock_07", "SM_rock_09"}
+PROP_MESH_NAMES = {"SM_BranchCoral", "SM_PlateCoral", "SM_BrainCoral", "SM_FanCoral",
+                   "SM_TubeCoral", "SM_boulder_01", "SM_rock_07", "SM_rock_09"}
+PROP_TILT_DEG = 7.0
+PROP_Z_STRETCH = (0.85, 1.20)
 
 les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
@@ -35,7 +37,9 @@ for a in actors:
     by_class.setdefault(a.get_class().get_name(), []).append(a)
 
 need = {"CameraActor": 1, "DirectionalLight": 1, "SkyLight": 1,
-        "ExponentialHeightFog": 1, "StaticMeshActor": 1 + PROP_COUNT,
+        "ExponentialHeightFog": 1,
+        # floor + gobo + snow curtains + props
+        "StaticMeshActor": 2 + len(SNOW_CURTAIN_TAGS) + PROP_COUNT,
         "FishActor": SCHOOL_COUNT}
 missing = [k for k, n in need.items() if len(by_class.get(k, [])) < n]
 assert not missing, "missing actors: %s" % missing
@@ -139,6 +143,7 @@ assert curtain_tags == set(SNOW_CURTAIN_TAGS), \
 props = [a for a in smas if a is not floor and a is not gobo and a not in curtains]
 assert len(props) == PROP_COUNT, "expected %d reef props, got %d" % (PROP_COUNT, len(props))
 prop_mesh_names = set()
+tint_names = set()
 for prop in props:
     label = prop.get_actor_label()
     mesh = prop.static_mesh_component.static_mesh
@@ -150,8 +155,26 @@ for prop in props:
     lane = PROP_CLEAR_RADIUS_Y + (loc.x - PROP_CLEAR_NEAR_X) * PROP_CLEAR_TAPER
     assert abs(loc.y) >= lane - 1.0, \
         "%s at (%.1f, %.1f) blocks the camera lane (half-width %.1f)" % (label, loc.x, loc.y, lane)
+    # M4b Task 8: per-instance variation. A tint instance must be assigned (the plain material
+    # would mean every prop of a type is the same colour) and the actor must actually be tilted
+    # and stretched, within the tuned limits.
+    pmat = prop.static_mesh_component.get_material(0)
+    assert isinstance(pmat, unreal.MaterialInstanceConstant), \
+        "%s has no tint material instance: %s" % (label, pmat)
+    tint_names.add(pmat.get_path_name().rsplit("/", 1)[-1].split(".")[-1])
+    rot = prop.get_actor_rotation()
+    assert abs(rot.pitch) <= PROP_TILT_DEG + 1e-3 and abs(rot.roll) <= PROP_TILT_DEG + 1e-3, \
+        "%s tilt out of range: pitch=%.2f roll=%.2f" % (label, rot.pitch, rot.roll)
+    sc3 = prop.get_actor_scale3d()
+    ratio = sc3.z / sc3.x
+    assert PROP_Z_STRETCH[0] - 1e-3 <= ratio <= PROP_Z_STRETCH[1] + 1e-3, \
+        "%s Z stretch out of range: %.3f" % (label, ratio)
 assert prop_mesh_names == PROP_MESH_NAMES, \
     "not every prop mesh is represented: %s" % sorted(PROP_MESH_NAMES - prop_mesh_names)
+# The whole point of the tint instances is variation: if every prop landed on _v0 the extra
+# instances exist but nothing in the frame looks different.
+tint_suffixes = {n.rsplit("_", 1)[-1] for n in tint_names}
+assert len(tint_suffixes) >= 2, "props use only one tint variant: %s" % sorted(tint_names)
 
 # Post-process grade (M4b): unbound, and every field it sets must have its override_ flag on,
 # because a PostProcessSettings field with the flag left False is silently ignored.
@@ -175,5 +198,6 @@ ws_list = unreal.GameplayStatics.get_all_actors_of_class(world, unreal.WorldSett
 assert len(ws_list) == 1, "expected exactly one WorldSettings, got %d" % len(ws_list)
 assert ws_list[0].get_editor_property("default_game_mode") is None, "map overrides the default game mode"
 
-print("SCENE_OK actors=%d fish=%d props=%d species=%d"
-      % (len(actors), len(fishes), len(props), len(mesh_names)))
+print("SCENE_OK actors=%d fish=%d props=%d species=%d curtains=%d tints=%d"
+      % (len(actors), len(fishes), len(props), len(mesh_names),
+         len(curtains), len(tint_names)))
