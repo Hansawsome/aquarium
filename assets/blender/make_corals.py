@@ -285,6 +285,77 @@ def coral_color_fn(base, shade, scale=7.0):
     return build
 
 
+def coral_maps_fn(base, shade, detail, scale=7.0, bump_strength=0.35,
+                  bump_distance=0.3):
+    """Return a build_nodes(nt, bsdf, ctx) callback for fishlib.bake_maps.
+
+    `base`/`shade` are the two tints mixed by a contrast-stretched noise texture, exactly as
+    coral_color_fn does, so the baked base colour is unchanged in character. `detail(nt, ctx)`
+    returns (height_socket, roughness_socket): the height drives a Bump node into the Principled
+    Normal input (that is what the NORMAL bake picks up) and the roughness goes straight into
+    Roughness. The height also darkens the base colour in the troughs, because a groove that is
+    only a normal-map dent still reads flat under flat ambient light.
+
+    `bump_distance` is the relief amplitude in centimetres and MUST be set explicitly: Blender
+    5.2 defaults the Bump node's Distance socket to 0.001, not 1.0, so leaving it alone bakes a
+    normal map with ~2e-6 pixel variance -- a map that passes _assert_not_degenerate on noise
+    alone and then does nothing in Unreal. 0.3 cm puts the five coral normal maps at 1e-3..4e-3
+    variance, a few times the fish maps' 5e-4, which is right for a coarser surface."""
+    def build(nt, bsdf, ctx):
+        tex = nt.nodes.new("ShaderNodeTexNoise")
+        tex.inputs["Scale"].default_value = scale
+        tex.inputs["Detail"].default_value = 6.0
+        tex.inputs["Roughness"].default_value = 0.55
+        stretch = nt.nodes.new("ShaderNodeMapRange")
+        stretch.inputs["From Min"].default_value = 0.35
+        stretch.inputs["From Max"].default_value = 0.65
+        nt.links.new(tex.outputs["Fac"], stretch.inputs["Value"])
+        col = F.mix_over(nt, base, stretch.outputs[0], shade)
+
+        height, rough = detail(nt, ctx)
+
+        # troughs (height near 0) get the shade tint laid over the mottled base
+        ao = nt.nodes.new("ShaderNodeMath"); ao.operation = 'SUBTRACT'
+        ao.inputs[0].default_value = 1.0
+        nt.links.new(height, ao.inputs[1])
+        darkened = F.mix_over(nt, col, ao.outputs[0], shade)
+        nt.links.new(darkened, bsdf.inputs["Base Color"])
+
+        nt.links.new(rough, bsdf.inputs["Roughness"])
+
+        bump = nt.nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = bump_strength
+        bump.inputs["Distance"].default_value = bump_distance
+        nt.links.new(height, bump.inputs["Height"])
+        nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    return build
+
+
+def detail_branch(nt, ctx):
+    """Branch coral: small polyp bumps all over the tapered cylinders."""
+    return ctx["scale_pattern_world"](nt, cell_size=1.1, sharpness=0.9)
+
+
+def detail_plate(nt, ctx):
+    """Plate coral: concentric growth rings, 2.4 cm apart, plus a fine polyp break-up."""
+    return F.radial_ridge_pattern(nt, period=2.4, sharpness=1.3)
+
+
+def detail_brain(nt, ctx):
+    """Brain coral: a second, much finer meander on top of the geometric grooves. The mesh
+    already carries the big convolutions; what is missing at 10 m is the texture inside them."""
+    return ctx["scale_pattern_world"](nt, cell_size=0.8, sharpness=1.6)
+
+
+def detail_fan(nt, ctx):
+    """Sea fan: fine cross-hatch along the lattice, read as the polyp rows on each branch."""
+    return F.ridge_pattern(nt, axis="Z", period=0.9, sharpness=1.1)
+
+
+def detail_tube(nt, ctx):
+    """Tube coral: horizontal growth bands around each tube, 1.8 cm apart."""
+    return F.ridge_pattern(nt, axis="Z", period=1.8, sharpness=1.4)
+
 # ---------------------------------------------------------------------------
 # export
 # ---------------------------------------------------------------------------
@@ -318,14 +389,13 @@ def save_and_export_static(ob, blend_path, fbx_path):
 
 
 def build_coral(spec):
-    """Full pipeline for one coral: fresh scene -> geometry -> unwrap -> bake -> guards ->
-    .blend + .fbx. Returns dict(verts, dims)."""
+    """Full pipeline for one coral: fresh scene -> geometry -> unwrap -> bake three maps ->
+    guards -> .blend + .fbx. Returns dict(verts, dims)."""
     name = spec["name"]
     F.reset_scene()
     ob = spec["build"](name)
     F.unwrap(ob)
-    F.bake_base_color(ob, "M_" + name, spec["color"], "T_%s_BaseColor" % name,
-                      EXPORT, size=TEXTURE_SIZE)
+    F.bake_maps(ob, "M_" + name, spec["maps"], name, EXPORT, size=TEXTURE_SIZE)
     check_export_ready(ob, dims=spec["dims"])
     save_and_export_static(ob, os.path.join(ROOT, name + ".blend"),
                            os.path.join(EXPORT, name + ".fbx"))
@@ -357,18 +427,23 @@ def render_group_preview(specs, path, xs=(-260.0, -130.0, 0.0, 130.0, 260.0)):
 SPECS = [
     dict(name="BranchCoral", build=build_branch_coral,
          color=coral_color_fn((0.9, 0.35, 0.45, 1), (0.55, 0.15, 0.3, 1), scale=9.0),
+         maps=coral_maps_fn((0.9, 0.35, 0.45, 1), (0.55, 0.15, 0.3, 1), detail_branch, scale=9.0),
          dims=((20, 100), (20, 100), (68, 72))),
     dict(name="PlateCoral", build=build_plate_coral,
          color=coral_color_fn((0.85, 0.7, 0.5, 1), (0.55, 0.42, 0.28, 1), scale=6.0),
+         maps=coral_maps_fn((0.85, 0.7, 0.5, 1), (0.55, 0.42, 0.28, 1), detail_plate, scale=6.0),
          dims=((80, 120), (80, 120), (10, 22))),
     dict(name="BrainCoral", build=build_brain_coral,
          color=coral_color_fn((0.75, 0.6, 0.8, 1), (0.42, 0.3, 0.5, 1), scale=11.0),
+         maps=coral_maps_fn((0.75, 0.6, 0.8, 1), (0.42, 0.3, 0.5, 1), detail_brain, scale=11.0),
          dims=((50, 72), (50, 72), (24, 40))),
     dict(name="FanCoral", build=build_fan_coral,
          color=coral_color_fn((0.92, 0.45, 0.30, 1), (0.55, 0.20, 0.14, 1), scale=13.0),
+         maps=coral_maps_fn((0.92, 0.45, 0.30, 1), (0.55, 0.20, 0.14, 1), detail_fan, scale=13.0),
          dims=((20, 90), (1, 12), (58, 62))),
     dict(name="TubeCoral", build=build_tube_coral,
          color=coral_color_fn((0.55, 0.80, 0.72, 1), (0.25, 0.45, 0.42, 1), scale=8.0),
+         maps=coral_maps_fn((0.55, 0.80, 0.72, 1), (0.25, 0.45, 0.42, 1), detail_tube, scale=8.0),
          dims=((25, 60), (25, 60), (24, 48))),
 ]
 

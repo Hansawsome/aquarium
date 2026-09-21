@@ -590,8 +590,10 @@ def bake_maps(body, mat_name, build_nodes, base_name, export_dir, size=2048, sam
     nt = mat.node_tree; nt.nodes.clear()
     out = nt.nodes.new("ShaderNodeOutputMaterial")
     bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled"); bsdf.inputs["Roughness"].default_value = 0.35
-    ctx = {"scale_pattern": scale_pattern, "position_axis": position_axis,
-           "axis_band_mask": axis_band_mask, "mix_over": mix_over}
+    ctx = {"scale_pattern": scale_pattern, "scale_pattern_world": scale_pattern_world,
+           "position_axis": position_axis, "axis_band_mask": axis_band_mask,
+           "mix_over": mix_over, "ridge_pattern": ridge_pattern,
+           "radial_ridge_pattern": radial_ridge_pattern}
     build_nodes(nt, bsdf, ctx)
     nt.links.new(bsdf.outputs[0], out.inputs[0])
     body.data.materials.append(mat)
