@@ -113,6 +113,10 @@ public:
 	int32 EvadeNoticeCount() const { return EvadeValue.NoticeCount(); }
 	// 도장이 박혔는지. 세션 리셋으로만 풀린다.
 	bool IsStamped() const { return bStamped; }
+	// 이름표 컴포넌트를 **실제로 달고 있는지**. IsStamped()와 다르다 -- 내 물고기는
+	// 도장 없이 이름표만 달고, 그 둘을 한 상태 변수로 보면 "입장 직후 모든 물고기에
+	// 이름표"를 보는 시험이 아무것도 못 본다.
+	bool HasNameTag() const { return NameTag != nullptr; }
 	// 잡힌 물고기에 아이의 표시를 박는다. **떼는 함수는 없다** -- 실수로 잃는 것은
 	// 벌이 되기 때문이다. 되돌리는 길은 나가기(ClearStampForSessionReset) 하나뿐이다.
 	UNameTagComponent* ApplyStamp(const FText& ChildName);

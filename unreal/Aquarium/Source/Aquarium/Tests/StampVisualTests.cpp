@@ -5,6 +5,7 @@
 #include "AquariumTestWorld.h"
 
 #include "FishActor.h"
+#include "FishSchoolSubsystem.h"
 #include "NameTagComponent.h"
 #include "NameTagWidget.h"
 
@@ -81,6 +82,50 @@ bool FStampFollowsTheFish::RunTest(const FString&)
 	TestTrue(TEXT("the fish itself moved"), !Fish->GetActorLocation().Equals(FishBefore, 1.f));
 	const FVector After = Tag->GetComponentLocation();
 	TestTrue(TEXT("the mark moved with the fish"), !After.Equals(Before, 1.f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOnlyMyFishIsTaggedAtEntry, "Aquarium.Stamp.OnlyMyFishIsTaggedAtEntry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FOnlyMyFishIsTaggedAtEntry::RunTest(const FString&)
+{
+	// 입장한 순간 이름표를 단 물고기는 **정확히 하나**, 내 물고기뿐이다.
+	// 배경 물고기는 잡히기 전까지 아무 표시도 달지 않는다(시나리오 결정표:
+	// "도장은 클릭이 아니라 잡았을 때 붙는다").
+	//
+	// 상태 변수가 아니라 **컴포넌트가 실제로 존재하는지**를 센다. bStamped만 보면
+	// 이름표는 달았지만 도장은 아닌 내 물고기가 0으로 세어져 시험이 눈을 감는다.
+	AquariumTest::FWorld W;
+	AquariumTest::SpawnDiverCamera(W.Get());
+	UFishSchoolSubsystem* SchoolSub = W.Get()->GetSubsystem<UFishSchoolSubsystem>();
+	if (!TestNotNull(TEXT("school subsystem"), SchoolSub)) return false;
+	TArray<AFishActor*> School;
+	for (int32 i = 0; i < 8; ++i)
+	{
+		AFishActor* Fish = AquariumTest::SpawnBackgroundFish(W.Get(), 11u + i, 400.f + 20.f * i,
+			FVector2D(30.f * i - 90.f, 100.f));
+		// **반드시 등록한다.** 자동화 월드에서는 BeginPlay가 돌지 않아 물고기가
+		// 스스로 등록하지 않고, 등록되지 않은 물고기는 잡기·도장 경로가 아예
+		// 보지 못한다 -- 그러면 이 시험은 초록불인 채 아무것도 보지 않는다.
+		SchoolSub->Register(Fish);
+		School.Add(Fish);
+	}
+	AFishActor* Mine = W.BeginSession();
+	if (!TestNotNull(TEXT("player fish"), Mine)) return false;
+	SchoolSub->Register(Mine);   // 실제 레벨에서는 BeginPlay가 해 주는 일
+
+	// 이 시험이 무언가를 보고 있다는 증거: 배경 물고기가 실제로 여덟 마리 있다.
+	TestEqual(TEXT("the school really is there"), School.Num(), 8);
+	TestEqual(TEXT("and the school subsystem really sees them"),
+		SchoolSub->RegisteredFish().Num(), 9);   // 배경 8 + 내 물고기 1
+	int32 Tagged = 0;
+	for (AFishActor* Fish : School)
+	{
+		if (Fish && Fish->HasNameTag()) { ++Tagged; }
+	}
+	TestEqual(TEXT("no background fish carries a mark at entry"), Tagged, 0);
+	TestTrue(TEXT("my own fish does carry its name"), Mine->HasNameTag());
+	TestFalse(TEXT("and my own fish is not stamped"), Mine->IsStamped());
 	return true;
 }
 
