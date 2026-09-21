@@ -438,6 +438,26 @@ UNameTagComponent* AFishActor::AttachNameTag(const FText& Name)
 	return NameTag;
 }
 
+UNameTagComponent* AFishActor::ApplyStamp(const FText& ChildName)
+{
+	UNameTagComponent* Tag = AttachNameTag(ChildName);
+	if (Tag)
+	{
+		bStamped = true;
+	}
+	return Tag;
+}
+
+void AFishActor::ClearStampForSessionReset()
+{
+	bStamped = false;
+	if (NameTag)
+	{
+		NameTag->DestroyComponent();
+		NameTag = nullptr;
+	}
+}
+
 void AFishActor::UpdateNameTagLocation()
 {
 	if (NameTag)

@@ -1,4 +1,6 @@
 #include "AquariumGameMode.h"
+
+#include "CatchSubsystem.h"
 #include "DiverPlayerController.h"
 #include "DiverSpectatorPawn.h"
 #include "FishActor.h"
@@ -247,6 +249,14 @@ void AAquariumGameMode::EndSession()
 		PlayerFishActor = nullptr;
 	}
 	Session.End();
+	// 나가기로 도장이 리셋된다(시나리오 결정표). 세션 동안은 유지된다.
+	if (UWorld* W = GetWorld())
+	{
+		if (UCatchSubsystem* CatchSub = W->GetSubsystem<UCatchSubsystem>())
+		{
+			CatchSub->ResetSession();
+		}
+	}
 }
 
 bool AAquariumGameMode::HasActiveSession() const

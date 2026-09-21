@@ -28,6 +28,9 @@ public:
 	void Register(AFishActor* Fish);
 	void Unregister(AFishActor* Fish);
 	int32 RegisteredCount() const { return Fishes.Num(); }
+	// 등록된 물고기 자체. 잡기 판정은 BoidNeighbor 스냅샷으로는 안 된다 --
+	// 액터에 도장을 찍고 회피를 걸어야 하기 때문이다.
+	const TArray<TWeakObjectPtr<AFishActor>>& RegisteredFish() const { return Fishes; }
 
 	// Every registered fish in the shared swim frame. Rebuilt at most once per frame.
 	const std::vector<aquarium::BoidNeighbor>& Neighbors();
