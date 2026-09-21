@@ -25,6 +25,10 @@ RUN_SEC="${RUN_SEC:-95}"
 WARMUP_SEC="${WARMUP_SEC:-30}"
 AUTO_NICKNAME="${AUTO_NICKNAME:-측정}"
 ASSIGNMENT_SEED="${ASSIGNMENT_SEED:-1}"
+# EXTRA_ARGS is appended verbatim to the engine command line so a per-item
+# attribution run can disable exactly ONE behaviour at a time, e.g.
+#   EXTRA_ARGS="-AquariumNoSchooling" ./scripts/measure_m2b_perf.sh
+# It is intentionally unquoted on expansion so several flags can be passed.
 DATE="$(date +%F)"
 CSV="$ROOT/docs/reviews/$DATE-m2b-frametimes.csv"
 REPORT="$ROOT/docs/reviews/$DATE-m2b-perf.md"
@@ -44,6 +48,7 @@ rm -f "$CSV"
   -notexturestreaming -unattended -nosplash -log \
   -AquariumAutoNickname="$AUTO_NICKNAME" -AquariumAssignmentSeed="$ASSIGNMENT_SEED" \
   -AquariumFrameStats="$CSV" \
+  ${EXTRA_ARGS:-} \
   >/dev/null 2>&1 &
 PID=$!
 
