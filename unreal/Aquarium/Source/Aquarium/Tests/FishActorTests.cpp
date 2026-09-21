@@ -925,4 +925,69 @@ bool FFishActorRecoveryUsesCurrentInput::RunTest(const FString&)
 	return true;
 }
 
+// F-09: exactly one fish per click, and it is the frontmost one.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishClickPicksFrontmost, "Aquarium.Fish.ClickPicksFrontmostFish",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishClickPicksFrontmost::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	TestNotNull(TEXT("subsystem"), School);
+
+	// PLAN DEVIATION, see the report: the plan spawned mesh-less fish, but AsClickTarget derives
+	// its half extents from the RENDERED bounds, so a fish with no mesh has zero extents and is
+	// correctly invisible to a click. A real mesh is what makes this test exercise anything.
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Mesh)) return false;
+
+	// Three fish stacked on the same screen point at different plane depths.
+	TArray<AFishActor*> Fish;
+	for (float Depth : {700.f, 330.f, 500.f})
+	{
+		AFishActor* F = World->SpawnActor<AFishActor>();
+		F->PlaneOrigin = FVector(Depth, 0.f, 100.f);
+		F->SetMesh(Mesh);
+		F->InitializeSwim();
+		School->Register(F);
+		Fish.Add(F);
+	}
+	// A ray from the camera position straight at that point.
+	FVector Hit = FVector::ZeroVector;
+	AFishActor* Picked = School->PickFrontmostHit(FVector(0.f, 0.f, 100.f), FVector(1.f, 0.f, 0.f), Hit);
+	TestTrue(TEXT("something was hit"), Picked != nullptr);
+	// TestEqual is ambiguous for AFishActor* (plan error), so compare the pointers directly.
+	TestTrue(TEXT("the frontmost plane wins"), Picked == Fish[1]);   // depth 330
+	TestEqual(TEXT("hit point is on that plane"), static_cast<float>(Hit.X), 330.f, 0.1f);
+	return true;
+}
+
+// F-09: empty water affects nothing at all.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishClickOnEmptyWater, "Aquarium.Fish.ClickOnEmptyWaterHitsNothing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFishClickOnEmptyWater::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	UFishSchoolSubsystem* School = World->GetSubsystem<UFishSchoolSubsystem>();
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang"));
+	if (!TestNotNull(TEXT("SK_BlueTang loads"), Mesh)) return false;
+	AFishActor* F = World->SpawnActor<AFishActor>();
+	F->PlaneOrigin = FVector(400.f, 0.f, 100.f);
+	F->SetMesh(Mesh);
+	F->InitializeSwim();
+	School->Register(F);
+
+	// Sanity: the same ray aimed AT the fish does hit, so the miss below is about where the ray
+	// points and not about a target list that is empty for some other reason.
+	FVector AimedHit = FVector::ZeroVector;
+	TestTrue(TEXT("a ray aimed at the fish does hit it"),
+		School->PickFrontmostHit(FVector(0.f, 0.f, 100.f), FVector(1.f, 0.f, 0.f), AimedHit) == F);
+
+	FVector Hit = FVector::ZeroVector;
+	// 3 m above every fish: nothing to hit.
+	AFishActor* Picked = School->PickFrontmostHit(FVector(0.f, 0.f, 400.f), FVector(1.f, 0.f, 0.f), Hit);
+	TestNull(TEXT("empty water hits nothing"), Picked);
+	TestTrue(TEXT("no fish was disturbed"), F->FleeState() == aquarium::BehaviorState::Normal);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

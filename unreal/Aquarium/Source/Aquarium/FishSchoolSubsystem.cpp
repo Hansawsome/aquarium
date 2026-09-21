@@ -16,6 +16,7 @@ void UFishSchoolSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// curtains would be the expensive item was refuted by exactly this kind of measurement.
 	bSchoolingEnabled = !ParseDisableFlag(FCommandLine::Get(), TEXT("AquariumNoSchooling"));
 	bPropAvoidanceEnabled = !ParseDisableFlag(FCommandLine::Get(), TEXT("AquariumNoPropAvoid"));
+	bFleeEnabled = !ParseDisableFlag(FCommandLine::Get(), TEXT("AquariumNoFlee"));
 #endif
 }
 
@@ -65,6 +66,43 @@ const std::vector<aquarium::BoidNeighbor>& UFishSchoolSubsystem::Neighbors()
 	SnapshotFrame = Frame;
 	bSnapshotValid = true;
 	return Snapshot;
+}
+
+AFishActor* UFishSchoolSubsystem::PickFrontmostHit(const FVector& RayOrigin, const FVector& RayDir,
+                                                   FVector& OutHit)
+{
+	OutHit = FVector::ZeroVector;
+	if (!bFleeEnabled)
+	{
+		return nullptr;
+	}
+	Fishes.RemoveAll([](const TWeakObjectPtr<AFishActor>& P) { return !P.IsValid(); });
+	// Built fresh per click rather than cached: a click happens a few times a second at most, and
+	// a cached list would have to be invalidated on every move. This is the whole per-click cost.
+	TArray<AFishActor*> Actors;
+	std::vector<aquarium::ClickTarget> Targets;
+	Actors.Reserve(Fishes.Num());
+	Targets.reserve(static_cast<size_t>(Fishes.Num()));
+	for (const TWeakObjectPtr<AFishActor>& P : Fishes)
+	{
+		Actors.Add(P.Get());
+		Targets.push_back(P->AsClickTarget());
+	}
+	const FVector Dir = RayDir.GetSafeNormal();
+	const int Index = aquarium::PickFrontmostHit(
+		{static_cast<float>(RayOrigin.X), static_cast<float>(RayOrigin.Y), static_cast<float>(RayOrigin.Z)},
+		{static_cast<float>(Dir.X), static_cast<float>(Dir.Y), static_cast<float>(Dir.Z)},
+		Targets.data(), Targets.size());
+	if (Index < 0 || Index >= Actors.Num())
+	{
+		return nullptr;
+	}
+	// Re-derive the world hit point from the SAME numbers the rule used, so the point handed to
+	// ApplyFleeFrom cannot disagree with the point that decided the hit.
+	const float Depth = Targets[static_cast<size_t>(Index)].depth;
+	const float S = (Depth - static_cast<float>(RayOrigin.X)) / static_cast<float>(Dir.X);
+	OutHit = FVector(Depth, RayOrigin.Y + Dir.Y * S, RayOrigin.Z + Dir.Z * S);
+	return Actors[Index];
 }
 
 const FName UFishSchoolSubsystem::PropTag(TEXT("AquariumProp"));
