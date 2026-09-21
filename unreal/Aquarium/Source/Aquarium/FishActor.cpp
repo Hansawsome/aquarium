@@ -80,6 +80,7 @@ void AFishActor::InitializeSwim()
 			School->BuildObstaclesForPlane(PlaneOrigin, ObstaclePlaneHalfDepth, PlaneObstacles);
 		}
 	}
+	Flee = aquarium::FleeStateMachine();
 	Wander.Emplace(Seed, Area, /*arriveRadius*/ 15.f, /*targetLifetime*/ 8.f);
 	SwimPhase = 0.f;
 	InputDirection = {0.f, 0.f};
@@ -112,11 +113,26 @@ void AFishActor::StepSwim(float DeltaSeconds)
 	Wander->Update(Motion.position, DeltaSeconds);
 	// Player input replaces the wander target entirely; a zero input coasts the fish to a stop.
 	aquarium::Vec2 Desired = bPlayerControlled ? InputDirection : Wander->DesiredDirection(Motion.position);
+	// FLEE LAYER (F-10/F-11/F-12). Placed here because fleeing REPLACES the answer to "where do I
+	// want to go", exactly like arrow-key input and wander do -- it is not a correction applied to
+	// that answer. Everything after this point (obstacles, boundary, StepMotion, Clamp) still runs,
+	// so a startled fish can neither swim through a rock (M4c) nor leave the visible area (F-07,
+	// and the M3 guarantee that the wall always gets the last word).
+	Flee.Step(DeltaSeconds);
+	const bool bFleeing = Flee.State() == aquarium::BehaviorState::Fleeing;
+	if (bFleeing)
+	{
+		Desired = Flee.FleeDirection();
+	}
+	// The speed burst is what makes a course change read as being startled (F-10). Only maxSpeed
+	// is scaled; scaling accel as well would spike the velocity on the first frame, which is the
+	// "sliding" F-13 forbids.
+	MotionParamsValue.maxSpeed = MaxSpeed * Flee.SpeedScale(FleeParamsValue);
 	// Schooling applies to background fish only. The player's fish is never a boid: arrow keys
 	// must map to motion with nothing mixed in, or the child gets "I pressed left and it went
 	// somewhere else" (F-05/F-07). The other direction -- background fish reacting to the player
 	// -- is handled inside AsNeighbor(), which marks the player fish avoidOnly.
-	if (!bPlayerControlled && !bIsPlayerFish)
+	if (!bPlayerControlled && !bIsPlayerFish && !bFleeing)
 	{
 		UWorld* W = GetWorld();
 		UFishSchoolSubsystem* School = W ? W->GetSubsystem<UFishSchoolSubsystem>() : nullptr;
@@ -369,6 +385,33 @@ void AFishActor::UpdateNameTagLocation()
 	{
 		NameTag->SetWorldLocation(GetActorLocation() + FVector(0.f, 0.f, NameTagHeight));
 	}
+}
+
+void AFishActor::ApplyFleeFrom(const FVector& WorldTouch)
+{
+	// The rules layer works in plane-local 2D; the touch arrives in world space.
+	const aquarium::Vec2 TouchLocal{
+		static_cast<float>(WorldTouch.Y) - Plane.origin.y,
+		static_cast<float>(WorldTouch.Z) - Plane.origin.z};
+	// F-10's "otherwise a valid direction toward the screen centre". The swim area is centred on
+	// the plane origin and that origin sits on the camera axis, so the direction toward the plane
+	// centre IS the direction toward the screen centre. When the fish is exactly at the centre
+	// this is zero too, and the rules layer's last-resort fallback takes over.
+	const aquarium::Vec2 TowardCentre = (aquarium::Vec2{0.f, 0.f} - Motion.position).Normalized();
+	Flee.Touch(TouchLocal, Motion.position, Motion.velocity, TowardCentre, FleeParamsValue);
+}
+
+aquarium::ClickTarget AFishActor::AsClickTarget() const
+{
+	aquarium::ClickTarget T;
+	T.depth = Plane.origin.x;
+	// Same shared frame as AsNeighbor(): every plane uses right = +Y and up = +Z.
+	T.center = {Plane.origin.y + Motion.position.x, Plane.origin.z + Motion.position.y};
+	// Derived from what is actually drawn, including the player fish's normalization scale.
+	const FBoxSphereBounds B = Body->CalcBounds(Body->GetComponentTransform());
+	T.halfWidth = static_cast<float>(B.BoxExtent.Y);
+	T.halfHeight = static_cast<float>(B.BoxExtent.Z);
+	return T;
 }
 
 int32 AFishActor::ComputeSpeciesKey() const
