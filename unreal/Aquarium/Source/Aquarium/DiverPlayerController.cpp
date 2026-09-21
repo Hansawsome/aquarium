@@ -96,6 +96,7 @@ void ADiverPlayerController::BeginPlay()
 	StartUiCaptureIfRequested();
 	StartFrameStatsIfRequested();
 	StartAutoInputIfRequested();
+	StartAutoDashIfRequested();
 	StartAutoClickIfRequested();
 	StartClickLogIfRequested();
 
@@ -277,6 +278,7 @@ void ADiverPlayerController::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 #if !UE_BUILD_SHIPPING
 	AdvanceAutoInput(DeltaSeconds);
+	AdvanceAutoDash(DeltaSeconds);
 	AdvanceAutoClick(DeltaSeconds);
 #endif
 	ApplyInputToPlayerFish(DeltaSeconds);
@@ -740,6 +742,50 @@ void ADiverPlayerController::StartAutoInputIfRequested()
 	if (AutoInputSteps.Num() == 0)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AquariumAutoInput: no usable entries; scripted input disabled"));
+	}
+#endif
+}
+
+bool ADiverPlayerController::ParseAutoDash(const TCHAR* CmdLine, float& OutPeriodSeconds)
+{
+	OutPeriodSeconds = 0.f;
+	FString Value;
+	if (!CmdLine || !FParse::Value(CmdLine, TEXT("-AquariumAutoDash="), Value))
+	{
+		return false;
+	}
+	Value.TrimStartAndEndInline();
+	const float Period = FCString::Atof(*Value);
+	if (Value.IsEmpty() || !(Period > 0.f))
+	{
+		return false;
+	}
+	OutPeriodSeconds = Period;
+	return true;
+}
+
+void ADiverPlayerController::StartAutoDashIfRequested()
+{
+#if !UE_BUILD_SHIPPING
+	AutoDashPeriod = 0.f;
+	AutoDashElapsed = 0.f;
+	if (ParseAutoDash(FCommandLine::Get(), AutoDashPeriod))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AquariumAutoDash: armed every %.2f s"), AutoDashPeriod);
+	}
+#endif
+}
+
+void ADiverPlayerController::AdvanceAutoDash(float DeltaSeconds)
+{
+#if !UE_BUILD_SHIPPING
+	if (!(AutoDashPeriod > 0.f)) return;
+	AutoDashElapsed += DeltaSeconds;
+	while (AutoDashElapsed >= AutoDashPeriod)
+	{
+		AutoDashElapsed -= AutoDashPeriod;
+		// 실제 키와 **같은 함수**를 통과한다. 캡처가 검증하는 경로가 아이가 쓰는 경로다.
+		HandleDashPressed();
 	}
 #endif
 }

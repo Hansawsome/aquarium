@@ -64,6 +64,11 @@ public:
 	// Parses -AquariumAutoInput=<pattern>; false when absent or empty. Dev-only scripted arrow-key
 	// playback, e.g. "R3,U2,L3,D2,0 1".
 	static bool ParseAutoInput(const TCHAR* CmdLine, FString& OutPattern);
+	// Parses -AquariumAutoDash=<period seconds>; false when absent or not a positive number.
+	// Dev-only: presses the dash key every <period> seconds so a capture can contrast
+	// "aimless swimming" against "swimming WITH the dash". Nothing else can script the space
+	// bar -- a capture run has no real key events.
+	static bool ParseAutoDash(const TCHAR* CmdLine, float& OutPeriodSeconds);
 
 	// One scripted click: when, and where in the viewport (0..1 of width/height).
 	struct FAutoClick
@@ -161,6 +166,11 @@ private:
 	};
 	TArray<FAutoInputStep> AutoInputSteps;
 	float AutoInputElapsed = 0.f;
+	// Dev-only scripted dash: period in seconds (<=0 means off) and the time since the last press.
+	float AutoDashPeriod = 0.f;
+	float AutoDashElapsed = 0.f;
+	void StartAutoDashIfRequested();
+	void AdvanceAutoDash(float DeltaSeconds);
 	// Overwrites ArrowKeys from the scripted pattern; no-op when no pattern was given.
 	void AdvanceAutoInput(float DeltaSeconds);
 	// Parses "R3,U2,0 1" into steps; malformed entries are skipped with a warning.

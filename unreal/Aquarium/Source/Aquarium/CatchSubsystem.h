@@ -69,4 +69,8 @@ private:
 	// 테스트가 배경 물고기를 코끝 위/앞에 놓을 때 공유하는 계산.
 	void PlaceTargetAtScreenOffset(AFishActor* Target, AFishActor* Mine, float ScreenGap);
 	uint32 NextCueSeed = 1u;
+	// 판정이 성립한 틱 수(도장 수와 다르다 -- 같은 놈을 여러 번 들이받을 수 있다).
+	// 난이도 계측 로그가 읽는 값이고, 그래서 관측이지 규칙이 아니다.
+	int32 CatchTickCount = 0;
+	int32 BumpTickCount = 0;
 };

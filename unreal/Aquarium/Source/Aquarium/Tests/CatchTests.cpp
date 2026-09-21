@@ -20,6 +20,17 @@ void RunPlayer(AFishActor* Mine, const FVector2D& Dir, int32 Steps = 60)
 	Mine->SetInputDirection(Dir);
 	for (int32 i = 0; i < Steps; ++i) { Mine->StepSwim(1.f / 60.f); }
 }
+
+// **잡으려면 돌진해야 한다(M8 난이도 재조정).** 방향키만으로는 최고 속도로 정면을
+// 들이받아도 Bump다. 그러니 "잡힌다"를 주장하는 시험은 전부 여기를 통과해야 한다.
+// 30프레임(0.5초)은 상한선과 가속선이 만나는 지점 뒤다 -- 돌진이 실제로 속도를
+// 올렸는지를 각 시험이 CurrentSpeed로 다시 확인한다.
+void RunPlayerDashing(AFishActor* Mine, const FVector2D& Dir)
+{
+	RunPlayer(Mine, Dir);
+	Mine->PressDash();
+	for (int32 i = 0; i < 30; ++i) { Mine->StepSwim(1.f / 60.f); }
+}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCatchFastRamStamps, "Aquarium.Catch.FastRamStamps",
@@ -33,9 +44,10 @@ bool FCatchFastRamStamps::RunTest(const FString&)
 	if (!TestNotNull(TEXT("player fish"), Mine)) return false;
 	AFishActor* Target = CatchSub->SpawnTargetUnderNoseForTest(Mine);
 	if (!TestNotNull(TEXT("target"), Target)) return false;
-	RunPlayer(Mine, FVector2D(1.f, 0.f));
-	// 이 시험이 무언가를 보고 있다는 증거: 내 물고기는 실제로 빠르게 달리고 있다.
-	TestTrue(TEXT("the player is actually running"), Mine->CurrentSpeed() > Mine->MaxSpeed * 0.8f);
+	RunPlayerDashing(Mine, FVector2D(1.f, 0.f));
+	// 이 시험이 무언가를 보고 있다는 증거: 내 물고기는 **돌진으로만** 낼 수 있는
+	// 속도로 달리고 있다. 방향키만으로는 MaxSpeed를 넘을 수 없다.
+	TestTrue(TEXT("the player is actually dashing"), Mine->CurrentSpeed() > Mine->MaxSpeed * 1.2f);
 	CatchSub->SetTargetUnderNoseForTest(Target, Mine);      // 코끝 화면 위치에 다시 맞춘다
 	TestEqual(TEXT("nothing stamped yet"), CatchSub->StampCount(), 0);
 	CatchSub->Tick(1.f / 60.f);
@@ -74,7 +86,7 @@ bool FCatchCountsEachFishOnce::RunTest(const FString&)
 	AFishActor* Mine = W.BeginSession();
 	if (!TestNotNull(TEXT("player fish"), Mine)) return false;
 	AFishActor* Target = CatchSub->SpawnTargetUnderNoseForTest(Mine);
-	RunPlayer(Mine, FVector2D(1.f, 0.f));
+	RunPlayerDashing(Mine, FVector2D(1.f, 0.f));
 	for (int32 i = 0; i < 5; ++i)
 	{
 		CatchSub->SetTargetUnderNoseForTest(Target, Mine);
@@ -101,7 +113,7 @@ bool FCatchNeverStampsMyOwnFish::RunTest(const FString&)
 	// **내 물고기(깊이 220)가 언제나 맨 앞엣놈이라 뒤의 표적을 통째로 가린다**는
 	// 것이고, 그것은 표적이 있어야만 보인다.
 	AFishActor* Target = CatchSub->SpawnTargetUnderNoseForTest(Mine);
-	RunPlayer(Mine, FVector2D(1.f, 0.f));
+	RunPlayerDashing(Mine, FVector2D(1.f, 0.f));
 	CatchSub->SetTargetUnderNoseForTest(Target, Mine);
 	for (int32 i = 0; i < 30; ++i) { CatchSub->Tick(1.f / 60.f); }
 	TestFalse(TEXT("my fish is not stamped"), Mine->IsStamped());
@@ -121,7 +133,7 @@ bool FCatchNoticesBeforeContact::RunTest(const FString&)
 	AFishActor* Mine = W.BeginSession();
 	if (!TestNotNull(TEXT("player fish"), Mine)) return false;
 	AFishActor* Target = CatchSub->SpawnTargetUnderNoseForTest(Mine);
-	RunPlayer(Mine, FVector2D(1.f, 0.f));
+	RunPlayerDashing(Mine, FVector2D(1.f, 0.f));
 	// 코끝 앞쪽 0.08 화면 단위: 겹치지는 않되(상대 반지름 ~0.036) 눈치채는 반경
 	// (EvadeParams::noticeRadius = 0.13) 안이다.
 	CatchSub->SetTargetAheadForTest(Target, Mine, 0.08f);
@@ -149,7 +161,7 @@ bool FCatchPlaysThudOnlyOnACatch::RunTest(const FString&)
 	CatchSub->Tick(1.f / 60.f);
 	TestEqual(TEXT("no thud on a bump"), Audio->CuePlayCount(EAquariumCue::Thud), 0);
 	TestTrue(TEXT("but a bump is still an event"), Audio->CuePlayCount(EAquariumCue::Startle) > 0);
-	RunPlayer(Mine, FVector2D(1.f, 0.f));
+	RunPlayerDashing(Mine, FVector2D(1.f, 0.f));
 	CatchSub->SetTargetUnderNoseForTest(Target, Mine);
 	CatchSub->Tick(1.f / 60.f);
 	TestEqual(TEXT("thud on a catch"), Audio->CuePlayCount(EAquariumCue::Thud), 1);
@@ -166,13 +178,39 @@ bool FCatchResetsOnLeaving::RunTest(const FString&)
 	AFishActor* Mine = W.BeginSession();
 	if (!TestNotNull(TEXT("player fish"), Mine)) return false;
 	AFishActor* Target = CatchSub->SpawnTargetUnderNoseForTest(Mine);
-	RunPlayer(Mine, FVector2D(1.f, 0.f));
+	RunPlayerDashing(Mine, FVector2D(1.f, 0.f));
 	CatchSub->SetTargetUnderNoseForTest(Target, Mine);
 	CatchSub->Tick(1.f / 60.f);
 	TestEqual(TEXT("one stamp"), CatchSub->StampCount(), 1);
 	W.GameMode()->EndSession();
 	TestEqual(TEXT("reset to zero"), CatchSub->StampCount(), 0);
 	TestFalse(TEXT("the mark is gone from the fish too"), Target->IsStamped());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCatchKeysAloneDoNotStamp, "Aquarium.Catch.KeysAloneDoNotStamp",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FCatchKeysAloneDoNotStamp::RunTest(const FString&)
+{
+	// **사양 변경(M8 난이도 재조정)이고, 이 밀스톤의 중심 주장이다.** 예전에는 방향키만
+	// 붙들고 있어도 잡혔고, 실측으로 아무 기술 없는 자동 입력이 1분에 22마리를 찍었다.
+	// 그러면 돌진 키가 할 일이 없어진다. 이제 최고 속도로 정면을 들이받아도 Bump다.
+	AquariumTest::FWorld W;
+	UCatchSubsystem* CatchSub = W.Get()->GetSubsystem<UCatchSubsystem>();
+	AFishActor* Mine = W.BeginSession();
+	if (!TestNotNull(TEXT("player fish"), Mine)) return false;
+	AFishActor* Target = CatchSub->SpawnTargetUnderNoseForTest(Mine);
+	if (!TestNotNull(TEXT("target"), Target)) return false;
+	RunPlayer(Mine, FVector2D(1.f, 0.f), 60);
+	// 이 시험이 무언가를 보고 있다는 증거 둘: 최고 속도로 달리고 있고, 표적은
+	// 실제로 코끝에 겹쳐 있다(겹치지 않으면 Miss라 어떤 문턱에서도 통과한다).
+	TestTrue(TEXT("at full arrow-key speed"), Mine->CurrentSpeed() > Mine->MaxSpeed * 0.95f);
+	CatchSub->SetTargetUnderNoseForTest(Target, Mine);
+	CatchSub->Tick(1.f / 60.f);
+	TestEqual(TEXT("no stamp from arrow keys alone"), CatchSub->StampCount(), 0);
+	TestFalse(TEXT("not stamped"), Target->IsStamped());
+	TestTrue(TEXT("but it really was a hit: the fish was startled"),
+		Target->FleeState() != aquarium::BehaviorState::Normal);
 	return true;
 }
 

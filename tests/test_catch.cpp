@@ -24,6 +24,14 @@ RamTarget Fish(float depth, Vec2 centre, Vec2 vel = {0.f, 0.f}) {
 
 // 카메라는 원점, 평면들은 +X 앞에 있다(실제 배치와 같은 부호).
 const Vec3 kCam{0.f, 0.f, 0.f};
+
+// 방향키만으로 낼 수 있는 속도(= 최대 속도 그대로)와, **돌진 중에 실제로 도달하는**
+// 속도. 후자는 예측이 아니라 실측이다: DashParams(burstScale 2.4, burstDuration 0.9)와
+// 플레이어의 가속 140 cm/s^2에서 속도 상한(216까지 올랐다가 0.9초에 걸쳐 90으로
+// 내려온다)과 가속선이 만나는 점이 약 1.7배다. 실제 RHI 실행에서 관측된 접근 속도도
+// 방향키만일 때 최대 0.44 화면단위/초, 돌진을 섞으면 0.59까지 올라갔다.
+const float kKeysOnlySpeed = 90.f;
+const float kDashSpeed = 90.f * 1.7f;
 }
 
 TEST_CASE("a fast nose on the target catches it") {
@@ -32,11 +40,27 @@ TEST_CASE("a fast nose on the target catches it") {
     me.depth = 220.f;
     me.maxSpeed = 90.f;
     me.nose = {0.f, 0.f};              // 화면에서 정확히 겹친다
-    me.velocity = {90.f, 0.f};         // 최대 속도로 돌진
+    me.velocity = {kDashSpeed, 0.f};   // 돌진으로만 낼 수 있는 속도
     const RamResult r = EvaluateRam(kCam, me, targets.data(), targets.size(), kC);
     REQUIRE(r.outcome == RamOutcome::Catch);
     REQUIRE(r.targetIndex == 0);
     REQUIRE(r.closingSpeed > 0.f);
+}
+
+TEST_CASE("arrow keys alone, at full speed, only bump -- the dash is the catch") {
+    // **사양 변경(M8 난이도 재조정).** 예전에는 방향키만으로 똑바로 달리면 잡혔고,
+    // 그래서 아무렇게나 헤엄쳐도 1분에 22마리가 찍혔다(실측). 그러면 돌진 키가 할 일이
+    // 없어지고 '숙련의 게임'이라는 축이 통째로 죽는다. 이제 최고 속도로 정면을
+    // 들이받아도 Bump다 -- 잡으려면 반드시 돌진해야 한다.
+    std::vector<RamTarget> targets{Fish(400.f, {0.f, 0.f})};
+    Rammer me;
+    me.depth = 220.f;
+    me.maxSpeed = 90.f;
+    me.nose = {0.f, 0.f};
+    me.velocity = {kKeysOnlySpeed, 0.f};
+    const RamResult r = EvaluateRam(kCam, me, targets.data(), targets.size(), kC);
+    REQUIRE(r.outcome == RamOutcome::Bump);
+    REQUIRE(r.targetIndex == 0);
 }
 
 TEST_CASE("drifting into a fish does NOT catch it -- it only bumps") {
@@ -56,13 +80,14 @@ TEST_CASE("chasing a fish at the same speed never catches it") {
     // 시나리오의 그림 그대로: 달아나는 놈을 같은 속도로 따라가면 못 잡는다.
     // 깊이가 달라 화면 속도가 다르므로, 두 속도는 **화면에서** 같아지도록 만든다.
     const float mineDepth = 220.f, itsDepth = 400.f;
-    const float myScreenSpeed = 90.f / mineDepth;
+    const float myScreenSpeed = kDashSpeed / mineDepth;
     std::vector<RamTarget> targets{Fish(itsDepth, {0.f, 0.f}, {myScreenSpeed * itsDepth, 0.f})};
     Rammer me;
     me.depth = mineDepth;
     me.maxSpeed = 90.f;
     me.nose = {0.f, 0.f};
-    me.velocity = {90.f, 0.f};
+    // 돌진 중이어도 상대가 화면에서 같은 속도로 달아나면 접근 속도는 0이다.
+    me.velocity = {kDashSpeed, 0.f};
     const RamResult r = EvaluateRam(kCam, me, targets.data(), targets.size(), kC);
     REQUIRE(r.outcome == RamOutcome::Bump);
     REQUIRE(r.closingSpeed == Approx(0.f).margin(1e-3f));
@@ -89,7 +114,7 @@ TEST_CASE("no overlap is a plain miss, whatever the speed") {
     me.depth = 220.f;
     me.maxSpeed = 90.f;
     me.nose = {0.f, 0.f};
-    me.velocity = {90.f, 0.f};
+    me.velocity = {kDashSpeed, 0.f};
     const RamResult r = EvaluateRam(kCam, me, targets.data(), targets.size(), kC);
     REQUIRE(r.outcome == RamOutcome::Miss);
     REQUIRE(r.targetIndex == -1);
@@ -108,7 +133,7 @@ TEST_CASE("depth is normalized: two fish that look identical behave identically"
     me.depth = 220.f;
     me.maxSpeed = 90.f;
     me.nose = {22.f, 0.f};
-    me.velocity = {90.f, 0.f};
+    me.velocity = {kDashSpeed, 0.f};
     std::vector<RamTarget> a{near_};
     std::vector<RamTarget> b{far_};
     const RamResult ra = EvaluateRam(kCam, me, a.data(), a.size(), kC);
@@ -128,7 +153,7 @@ TEST_CASE("the frontmost overlapping fish is the one that gets hit") {
     me.depth = 220.f;
     me.maxSpeed = 90.f;
     me.nose = {0.f, 0.f};
-    me.velocity = {90.f, 0.f};
+    me.velocity = {kDashSpeed, 0.f};
     const RamResult r = EvaluateRam(kCam, me, targets.data(), targets.size(), kC);
     REQUIRE(r.targetIndex == 1);
 }
@@ -140,7 +165,7 @@ TEST_CASE("an already stamped fish can still be bumped but reports as stamped") 
     me.depth = 220.f;
     me.maxSpeed = 90.f;
     me.nose = {0.f, 0.f};
-    me.velocity = {90.f, 0.f};
+    me.velocity = {kDashSpeed, 0.f};
     const RamResult r = EvaluateRam(kCam, me, targets.data(), targets.size(), kC);
     // 잡히는 것 자체는 막지 않는다. 숫자를 두 번 올리지 않는 일은 StampBook이 한다.
     REQUIRE(r.outcome == RamOutcome::Catch);
@@ -171,7 +196,7 @@ TEST_CASE("nothing to ram is a miss, not a crash") {
     Rammer me;
     me.depth = 220.f;
     me.maxSpeed = 90.f;
-    me.velocity = {90.f, 0.f};
+    me.velocity = {kDashSpeed, 0.f};
     const RamResult r = EvaluateRam(kCam, me, nullptr, 0, kC);
     REQUIRE(r.outcome == RamOutcome::Miss);
     REQUIRE(r.targetIndex == -1);
@@ -182,7 +207,7 @@ TEST_CASE("a target behind the camera is never hit") {
     Rammer me;
     me.depth = 220.f;
     me.maxSpeed = 90.f;
-    me.velocity = {90.f, 0.f};
+    me.velocity = {kDashSpeed, 0.f};
     const RamResult r = EvaluateRam(kCam, me, targets.data(), targets.size(), kC);
     REQUIRE(r.outcome == RamOutcome::Miss);
 }
@@ -193,7 +218,7 @@ TEST_CASE("a zero-size target is skipped") {
     Rammer me;
     me.depth = 220.f;
     me.maxSpeed = 90.f;
-    me.velocity = {90.f, 0.f};
+    me.velocity = {kDashSpeed, 0.f};
     REQUIRE(EvaluateRam(kCam, me, targets.data(), targets.size(), kC).outcome == RamOutcome::Miss);
 }
 
@@ -212,7 +237,7 @@ TEST_CASE("there is no angle gate and no dwell timer in this header") {
     me.maxSpeed = 90.f;
     me.nose = {0.f, 0.f};
     // 옆에서 들이받는다(진행 방향이 상대의 장축과 수직). 그래도 잡힌다.
-    me.velocity = {0.f, 90.f};
+    me.velocity = {0.f, kDashSpeed};
     const RamResult r = EvaluateRam(kCam, me, targets.data(), targets.size(), kC);
     REQUIRE(r.outcome == RamOutcome::Catch);
 }

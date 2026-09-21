@@ -327,6 +327,30 @@ M4b를 M4b와 비교한 사고가 있었다).
   `-AquariumAutoInput`과 똑같이, 오타 하나가 "클릭이 하나도 발사되지 않은 그럴듯한 클립"을 만든다.
   새 대본은 기억이 아니라 `ADiverPlayerController::BuildAutoClicks`를 보고 쓴다.
 
+**`-AquariumAutoDash=<초>`와 `AquariumCatchStat` — 난이도 계측의 유일한 기구.** 시나리오 181행이
+"잡기가 실제로 어려운지는 테스트로 알 수 없다"고 못 박았으므로, 난이도 판정은 **실제 RHI 실행의
+로그**로만 한다. `-AquariumAutoDash=<초>`는 그 초마다 실제 키와 같은 `HandleDashPressed()`를
+부른다(자동 입력은 방향키만 대본으로 쓸 수 있고 스페이스는 쓸 수 없다). 플래그가 붙으면 언제나
+`AquariumAutoDash: armed every N s`를 찍으므로 하네스는 그 줄을 단언한다.
+`UCatchSubsystem`은 판정이 성립한 틱마다 한 줄을 남긴다:
+
+```
+AquariumCatchStat: t=63.70 outcome=catch stamped=17 catches=73 bumps=11 closing=0.30 threshold=0.47
+```
+
+`stamped`가 화면 구석의 숫자이고 `closing`/`threshold`가 난이도의 두 숫자다. **별명은 어느 필드에도
+들어가지 않는다**(P-03). 측정 예(64초, `ReefM1`, 시드 1):
+
+```bash
+"$UE/Engine/Binaries/Mac/UnrealEditor" "$PROJ" ReefM1 -game -windowed -ResX=1280 -ResY=720 -ForceRes \
+  -benchmark -fps=30 -seconds=64 -notexturestreaming -unattended -nosplash -stdout -FullStdOutLogOutput \
+  -AquariumAutoNickname=테스트 -AquariumAssignmentSeed=1 \
+  -AquariumAutoInput="R1,U1,L1,D1" -AquariumAutoDash=1.5 | grep AquariumCatchStat
+```
+
+2026-09-22 이 방법으로 잰 값: 방향키만(`R1,U1,L1,D1`, 돌진 없음) 64초 **0마리**, 같은 입력에
+돌진을 섞으면 64초 **2~6마리**. 조정 전(`catchSpeedFraction=0.55`)에는 방향키만으로 **17마리**였다.
+
 **`-AquariumClickLog=<csv 절대경로>`.** 클릭 시도마다 한 행을 남기고 EndPlay에서
 `AquariumClickLog: wrote %d clicks to %s`를 찍는다. 열은
 `index,time_s,ndc_x,ndc_y,hit_plane_x,hit,state_before`이며 **별명은 어느 열에도 들어가지 않는다**(P-03).

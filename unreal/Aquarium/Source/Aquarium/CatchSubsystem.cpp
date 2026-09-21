@@ -154,8 +154,19 @@ void UCatchSubsystem::Tick(float DeltaTime)
 	if (R.targetIndex < 0) return;
 	AFishActor* Hit = TargetActors[R.targetIndex].Get();
 	if (Hit == nullptr) return;
-	if (R.outcome == aquarium::RamOutcome::Catch) { OnCaught(Hit); }
-	else { OnBumped(Hit, Mine); }
+	if (R.outcome == aquarium::RamOutcome::Catch) { ++CatchTickCount; OnCaught(Hit); }
+	else { ++BumpTickCount; OnBumped(Hit, Mine); }
+#if !UE_BUILD_SHIPPING
+	// 난이도 계측의 **유일한** 기구. 시나리오 181행이 "잡기가 실제로 어려운지는
+	// 테스트로 알 수 없다"고 못 박았으므로, 실제 RHI 실행의 로그에서 세는 이 줄이
+	// 난이도 판정의 근거다. 별명은 어디에도 들어가지 않는다(P-03).
+	UE_LOG(LogTemp, Warning,
+		TEXT("AquariumCatchStat: t=%.2f outcome=%s stamped=%d catches=%d bumps=%d closing=%.2f threshold=%.2f"),
+		W->GetTimeSeconds(),
+		R.outcome == aquarium::RamOutcome::Catch ? TEXT("catch") : TEXT("bump"),
+		Book.Count(), CatchTickCount, BumpTickCount, R.closingSpeed,
+		aquarium::CatchThreshold(Me.maxSpeed, Me.depth, CatchParamsValue));
+#endif
 }
 
 // ---------------------------------------------------------------- 테스트 전용
