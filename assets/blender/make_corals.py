@@ -160,6 +160,110 @@ def build_brain_coral(name, radius=BRAIN_RADIUS, segments=64, rings=32, groove=3
     return ob
 
 
+FAN_HEIGHT = 60.0
+TUBE_HEIGHT = 45.0
+
+
+def build_fan_coral(name, seed=4711, height=FAN_HEIGHT, thickness=1.6, depth=4,
+                    root_len=18.0, root_radius=2.4):
+    """Sea fan: the branch-coral recursion constrained to the XZ plane, so the whole colony is a
+    flat lattice one or two centimetres thick. Children fan out to either side of the parent with
+    a strong +Z bias; because every direction has y = 0 the silhouette is a fan rather than a
+    bush. Joined, scaled to `height`, then thickened along Y by Solidify.
+    Precondition: object mode, scene reset. Returns the joined object."""
+    rng = random.Random(seed)
+    segments = []
+
+    def add_segment(start, direction, length, radius):
+        bpy.ops.mesh.primitive_cone_add(vertices=6, radius1=radius, radius2=radius * 0.7,
+                                        depth=length, location=(0, 0, 0))
+        seg = bpy.context.object
+        seg.rotation_euler = direction.to_track_quat('Z', 'Y').to_euler()
+        seg.location = start + direction * (length / 2)
+        segments.append(seg)
+        return start + direction * length, radius * 0.7
+
+    def grow(start, direction, length, radius, level):
+        tip, tip_radius = add_segment(start, direction, length, radius)
+        if level >= depth:
+            return
+        for sign in (-1.0, 1.0):
+            tilt = rng.uniform(0.35, 0.70) * sign
+            child = (Matrix.Rotation(tilt, 3, Vector((0, 1, 0))) @ direction)
+            child = (child + Vector((0, 0, 0.35))).normalized()
+            child.y = 0.0
+            child.normalize()
+            grow(tip, child, length * rng.uniform(0.62, 0.80), tip_radius, level + 1)
+
+    grow(Vector((0, 0, 0)), Vector((0, 0, 1)), root_len, root_radius, 0)
+
+    bpy.ops.object.select_all(action='DESELECT')
+    for s in segments:
+        s.select_set(True)
+    ob = segments[0]
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.join()
+    ob.name = name
+    ob.data.name = name
+    ob.scale = (height / ob.dimensions.z,) * 3
+    bpy.ops.object.transform_apply(scale=True)
+    sol = ob.modifiers.new("Solidify", 'SOLIDIFY')
+    sol.thickness = thickness
+    sol.offset = 0
+    bpy.ops.object.modifier_apply(modifier="Solidify")
+    bpy.ops.object.shade_smooth()
+    return ob
+
+
+def build_tube_coral(name, seed=9182, count=11, height=TUBE_HEIGHT, radius=4.2,
+                     spread=16.0, sides=10):
+    """Cluster of upright open-topped tubes rising from a common base. Each tube leans slightly
+    outward from the cluster centre, has its own height (x0.55..1.0) and its own radius
+    (x0.75..1.15), and is hollow at the top: the rim is a ring of two concentric circles, which
+    is what makes it read as a tube rather than a peg. Joined into one mesh.
+    Precondition: object mode, scene reset. Returns the joined object."""
+    rng = random.Random(seed)
+    mesh = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+
+    for i in range(count):
+        angle = 2 * math.pi * i / count + rng.uniform(-0.25, 0.25)
+        dist = spread * math.sqrt(rng.uniform(0.0, 1.0))
+        bx, by = dist * math.cos(angle), dist * math.sin(angle)
+        h = height * rng.uniform(0.55, 1.0)
+        r_out = radius * rng.uniform(0.75, 1.15)
+        r_in = r_out * 0.62
+        lean_x = (bx / max(1e-6, spread)) * h * 0.14
+        lean_y = (by / max(1e-6, spread)) * h * 0.14
+
+        def ring(z, r, ox, oy):
+            return [bm.verts.new((bx + ox + r * math.cos(2 * math.pi * j / sides),
+                                  by + oy + r * math.sin(2 * math.pi * j / sides), z))
+                    for j in range(sides)]
+
+        bottom = ring(0.0, r_out, 0.0, 0.0)
+        top_out = ring(h, r_out * 0.88, lean_x, lean_y)
+        top_in = ring(h, r_in * 0.88, lean_x, lean_y)
+        inner_bottom = ring(h * 0.25, r_in, lean_x * 0.25, lean_y * 0.25)
+        for j in range(sides):
+            k = (j + 1) % sides
+            bm.faces.new((bottom[j], top_out[j], top_out[k], bottom[k]))          # outer wall
+            bm.faces.new((top_out[j], top_in[j], top_in[k], top_out[k]))          # rim
+            bm.faces.new((top_in[k], inner_bottom[k], inner_bottom[j], top_in[j]))  # inner wall
+        bm.faces.new(list(reversed(inner_bottom)))                                 # tube floor
+        bm.faces.new(bottom)                                                       # base cap
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    ob = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(ob)
+    bpy.ops.object.select_all(action='DESELECT'); ob.select_set(True)
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.shade_smooth()
+    return ob
+
 # ---------------------------------------------------------------------------
 # procedural color: one flat base tint broken up by a noise texture
 # ---------------------------------------------------------------------------
@@ -185,7 +289,7 @@ def coral_color_fn(base, shade, scale=7.0):
 # export
 # ---------------------------------------------------------------------------
 
-def check_export_ready(ob, verts=(200, 8000), dims=None):
+def check_export_ready(ob, verts=(200, 14000), dims=None):
     """Raise before writing anything if the generated mesh is not a sane prop:
     missing UVs, an out-of-range vertex count, or dimensions outside `dims`
     ((w_min, w_max), (d_min, d_max), (h_min, h_max)) in cm."""
@@ -229,7 +333,7 @@ def build_coral(spec):
                 dims=tuple(round(v, 2) for v in ob.dimensions))
 
 
-def render_group_preview(specs, path, xs=(-120.0, 0.0, 120.0)):
+def render_group_preview(specs, path, xs=(-260.0, -130.0, 0.0, 130.0, 260.0)):
     """Rebuild the three corals side by side in one fresh scene and render a single EEVEE
     still. The procedural material is re-created directly (no bake) because this is only a
     visual check; nothing here is saved or exported."""
@@ -247,7 +351,7 @@ def render_group_preview(specs, path, xs=(-120.0, 0.0, 120.0)):
         spec["color"](nt, bsdf)
         nt.links.new(bsdf.outputs[0], out.inputs[0])
         ob.data.materials.append(mat)
-    F.render_preview(path, cam_loc=(0.0, -620.0, 130.0), cam_rot=(1.40, 0.0, 0.0))
+    F.render_preview(path, cam_loc=(0.0, -900.0, 150.0), cam_rot=(1.40, 0.0, 0.0))
 
 
 SPECS = [
@@ -260,12 +364,18 @@ SPECS = [
     dict(name="BrainCoral", build=build_brain_coral,
          color=coral_color_fn((0.75, 0.6, 0.8, 1), (0.42, 0.3, 0.5, 1), scale=11.0),
          dims=((50, 72), (50, 72), (24, 40))),
+    dict(name="FanCoral", build=build_fan_coral,
+         color=coral_color_fn((0.92, 0.45, 0.30, 1), (0.55, 0.20, 0.14, 1), scale=13.0),
+         dims=((20, 90), (1, 12), (58, 62))),
+    dict(name="TubeCoral", build=build_tube_coral,
+         color=coral_color_fn((0.55, 0.80, 0.72, 1), (0.25, 0.45, 0.42, 1), scale=8.0),
+         dims=((25, 60), (25, 60), (24, 48))),
 ]
 
 if __name__ == "__main__":
     os.makedirs(EXPORT, exist_ok=True)
     results = [build_coral(s) for s in SPECS]
     render_group_preview(SPECS, os.path.join(EXPORT, "preview_corals.png"))
-    print("CORALS_OK branch=%d plate=%d brain=%d dims=%s"
-          % (results[0]["verts"], results[1]["verts"], results[2]["verts"],
-             [r["dims"] for r in results]))
+    print("CORALS_OK " + " ".join(
+        "%s=%d" % (s["name"], r["verts"]) for s, r in zip(SPECS, results))
+        + " dims=%s" % [r["dims"] for r in results])
