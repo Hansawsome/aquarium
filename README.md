@@ -4,7 +4,7 @@
 
 ## 현재 상태
 
-규칙 계층(C++17, 테스트 66개)과 Unreal 5.8 프로젝트(`unreal/Aquarium`, Automation 테스트 37개)가 있습니다. 한글 별명으로 입장하면 5종 중 한 마리가 무작위 배정되고, 카메라에 가장 가까운 평면에서 이름표를 달고 헤엄칩니다. 배경에는 5종 36마리가 서로 다른 깊이·크기로 유영하고 바닥에는 산호 3종과 바위가 놓여 있습니다(`docs/reviews/`에 검토 영상). 방향키로 내 물고기를 조종할 수 있고(M3), 벽에서는 그대로 멈춥니다. 실사 반복(M4), 클릭 도망(M5), 패키징(M6)은 아직입니다. 물고기·산호 모델은 1차 실루엣이라 실사 기준에는 못 미칩니다.
+규칙 계층(C++17, 테스트 66개)과 Unreal 5.8 프로젝트(`unreal/Aquarium`, Automation 테스트 37개)가 있습니다. 한글 별명으로 입장하면 5종 중 한 마리가 무작위 배정되고, 카메라에 가장 가까운 평면에서 이름표를 달고 헤엄칩니다. 배경에는 5종 36마리가 서로 다른 깊이·크기로 유영하고 바닥에는 산호 3종과 바위가 놓여 있습니다(`docs/reviews/`에 검토 영상). 방향키로 내 물고기를 조종할 수 있고(M3), 벽에서는 그대로 멈춥니다. 실사 반복의 첫 단계(M4a)로 물고기 5종을 프로파일 곡선 몸통·눈·막 지느러미로 다시 만들고 종마다 2048² 세 장(베이스 컬러·노멀·러프니스)을 입혀 서브서피스 재질로 바꿨습니다. 실사 반복의 나머지(M4b 산호·바위·조명, M4c 무리 행동), 클릭 도망(M5), 패키징(M6)은 아직입니다. 산호·바위는 여전히 1차 품질이고, 물고기 비늘도 가까이서 보면 겹친 비늘 줄보다는 고운 표면 질감에 가깝습니다.
 
 ## 문서
 
@@ -14,6 +14,7 @@
 - [TASK — 진행 상태와 단계별 완료 기준](docs/TASK.md)
 - [M1 설계](docs/superpowers/specs/2026-09-20-m1-underwater-scene-design.md) · [M1 구현 계획](docs/superpowers/plans/2026-09-20-m1-underwater-scene.md)
 - [M2 설계](docs/superpowers/specs/2026-09-20-m2-session-design.md) · [M2 구현 계획](docs/superpowers/plans/2026-09-20-m2-session.md)
+- [M4a 설계](docs/superpowers/specs/2026-09-21-m4a-fish-fidelity-design.md) · [M4a 구현 계획](docs/superpowers/plans/2026-09-21-m4a-fish-fidelity.md)
 - [개발 환경 확인 결과](docs/ENVIRONMENT.md)
 - [설치 및 MCP 연결 상태](docs/SETUP.md)
 - [에셋 출처 기록](docs/ASSETS.md)
