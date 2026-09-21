@@ -2,6 +2,7 @@
 
 #include "FishSchoolSubsystem.h"
 #include "NameTagComponent.h"
+#include "NameTagWidget.h"
 
 #include "Engine/World.h"
 
@@ -443,6 +444,10 @@ UNameTagComponent* AFishActor::ApplyStamp(const FText& ChildName)
 	UNameTagComponent* Tag = AttachNameTag(ChildName);
 	if (Tag)
 	{
+		if (UNameTagWidget* Widget = Cast<UNameTagWidget>(Tag->GetUserWidgetObject()))
+		{
+			Widget->SetStampStyle(true);
+		}
 		bStamped = true;
 	}
 	return Tag;
