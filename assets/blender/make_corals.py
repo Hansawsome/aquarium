@@ -23,6 +23,14 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 EXPORT = os.path.join(ROOT, "export")
 TEXTURE_SIZE = 1024
 
+# Variance floor for every baked coral map. The library default 1e-6 only catches a perfectly
+# constant image: a Bump node left at Blender's 0.001 default Distance baked a visually flat
+# normal map with variance 2.4e-6 and still passed. 1e-4 sits ~40x above that observed noise
+# floor and ~5.7x below the weakest real coral map (PlateCoral normal, 5.75e-4); the other
+# normals run 1.9e-3..3.0e-3 and every roughness map runs 8.5e-2..1.4e-1, so a good bake clears
+# it by a wide margin while a flat one cannot.
+MIN_MAP_VARIANCE = 1e-4
+
 BRANCH_HEIGHT = 70.0    # cm, enforced by a final uniform scale
 PLATE_RADIUS = 50.0
 PLATE_THICKNESS = 4.0
@@ -395,7 +403,8 @@ def build_coral(spec):
     F.reset_scene()
     ob = spec["build"](name)
     F.unwrap(ob)
-    F.bake_maps(ob, "M_" + name, spec["maps"], name, EXPORT, size=TEXTURE_SIZE)
+    F.bake_maps(ob, "M_" + name, spec["maps"], name, EXPORT, size=TEXTURE_SIZE,
+                min_variance=MIN_MAP_VARIANCE)
     check_export_ready(ob, dims=spec["dims"])
     save_and_export_static(ob, os.path.join(ROOT, name + ".blend"),
                            os.path.join(EXPORT, name + ".fbx"))

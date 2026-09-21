@@ -576,13 +576,19 @@ def _bake_image(nt, img, body, bake_type, extra=None):
     return node
 
 
-def bake_maps(body, mat_name, build_nodes, base_name, export_dir, size=2048, samples=16):
+def bake_maps(body, mat_name, build_nodes, base_name, export_dir, size=2048, samples=16,
+              min_variance=1e-6):
     """Bakes base colour, normal and roughness to <export_dir>/T_<base_name>_{BaseColor,Normal,
     Roughness}.png and rewires the baked textures into the material. build_nodes(nt, bsdf, ctx)
     wires Base Color, Roughness and a Bump/Normal input; ctx carries {'scale_pattern': ...} and the
     colour helpers. Normal and roughness images are saved Non-Color. Raises RuntimeError if a baked
     map is degenerate (e.g. a normal map with near-zero pixel variance means nothing was baked).
-    Returns dict(material=..., images={'BaseColor':..., 'Normal':..., 'Roughness':...})."""
+    Returns dict(material=..., images={'BaseColor':..., 'Normal':..., 'Roughness':...}).
+
+    min_variance is the per-channel pixel-variance floor every baked map must clear. The default
+    1e-6 only catches a perfectly constant image: a Bump node whose Distance was left at Blender's
+    0.001 default baked a visually flat normal map with variance 2.4e-6 and slipped through. Pass a
+    stricter floor (the corals use 1e-4) when you know roughly how much signal a good bake has."""
     scene = bpy.context.scene
     mat = bpy.data.materials.new(mat_name)
     if mat.node_tree is None:   # Blender 5.x may return a material without a node tree
@@ -612,7 +618,7 @@ def bake_maps(body, mat_name, build_nodes, base_name, export_dir, size=2048, sam
         if non_color:
             img.colorspace_settings.name = 'Non-Color'
         nodes[suffix] = _bake_image(nt, img, body, bake_type)
-        _assert_not_degenerate(img, suffix)
+        _assert_not_degenerate(img, suffix, min_variance)
         img.filepath_raw = os.path.join(export_dir, name + ".png")
         img.file_format = 'PNG'
         img.save()
