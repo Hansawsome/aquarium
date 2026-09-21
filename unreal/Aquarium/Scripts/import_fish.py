@@ -78,6 +78,13 @@ def import_texture(dest, name, kind):
                                 unreal.TextureCompressionSettings.TC_NORMALMAP)
     else:  # Roughness and any other linear mask
         tex.set_editor_property("srgb", False)
+        # TC_MASKS is required, not just srgb=False: a mask left on TC_Default
+        # is a colour texture as far as the material compiler is concerned, and
+        # a Linear Grayscale/Masks sampler on it fails the whole material
+        # ("Sampler type is Linear Grayscale, should be Linear Color"), which
+        # silently swaps the fish for the Default Material at runtime.
+        tex.set_editor_property("compression_settings",
+                                unreal.TextureCompressionSettings.TC_MASKS)
     eal.save_loaded_asset(tex)
     return tex
 
@@ -147,7 +154,7 @@ def import_species(name):
 
     rgh = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -600, 600)
     rgh.set_editor_property("texture", tex_by_kind["Roughness"])
-    rgh.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE)
+    rgh.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_MASKS)
     mel.connect_material_property(rgh, "R", unreal.MaterialProperty.MP_ROUGHNESS)
 
     ss_scale = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -600, 900)
