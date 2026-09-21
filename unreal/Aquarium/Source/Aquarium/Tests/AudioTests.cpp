@@ -111,4 +111,24 @@ bool FAudioRapidCuesAreNeverDropped::RunTest(const FString&)
 	return true;
 }
 
+// 잡았을 때의 「쿵」은 놀람의 「퍽」과 **다른 에셋**이어야 한다. 같은 파일을
+// 두 번 꽂아 두면 아이는 '비켰다'와 '잡았다'를 소리로 구분하지 못한다.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAudioThudCueExists, "Aquarium.Audio.ThudCueExists",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FAudioThudCueExists::RunTest(const FString&)
+{
+	UWorld* World = nullptr;
+	UAquariumAudioSubsystem* Audio = MakeAudio(World);
+	if (!TestNotNull(TEXT("audio subsystem"), Audio)) return false;
+	USoundBase* Thud = Audio->SoundFor(EAquariumCue::Thud);
+	USoundBase* Startle = Audio->SoundFor(EAquariumCue::Startle);
+	TestNotNull(TEXT("thud wave loaded"), Thud);
+	TestNotNull(TEXT("startle wave loaded"), Startle);
+	TestTrue(TEXT("thud is a different asset from startle"), Thud != Startle);
+	// 큐를 더했는데 이 값이 안 늘면 어딘가를 빼먹은 것이다. 유일한 리터럴이고,
+	// 의도한 변경일 때만 사람이 손으로 고치라는 뜻이다.
+	TestEqual(TEXT("cue count"), static_cast<int32>(EAquariumCue::Count), 5);
+	return true;
+}
+
 #endif

@@ -11,6 +11,7 @@ namespace
 	// /Game/Audio 아래 import_audio.py가 만든 에셋들. 순서는 EAquariumCue와 짝이다.
 	const TCHAR* kCuePaths[] = {
 		TEXT("/Game/Audio/S_Startle.S_Startle"),
+		TEXT("/Game/Audio/S_Thud.S_Thud"),
 		TEXT("/Game/Audio/S_Nibble.S_Nibble"),
 		TEXT("/Game/Audio/S_Split.S_Split"),
 		TEXT("/Game/Audio/S_Bubble.S_Bubble"),

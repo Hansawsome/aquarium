@@ -27,6 +27,7 @@ eal = unreal.EditorAssetLibrary
 WAVS = [
     (os.path.join(AUDIO_SRC, "S_Swim.wav"), "S_Swim", True, True),
     (os.path.join(AUDIO_SRC, "S_Startle.wav"), "S_Startle", False, True),
+    (os.path.join(AUDIO_SRC, "S_Thud.wav"), "S_Thud", False, True),
     (os.path.join(AUDIO_SRC, "S_Nibble.wav"), "S_Nibble", False, True),
     (os.path.join(AUDIO_SRC, "S_Split.wav"), "S_Split", False, True),
     (os.path.join(AUDIO_SRC, "S_Bubble.wav"), "S_Bubble", False, True),

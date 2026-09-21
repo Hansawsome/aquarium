@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# 반응음 다섯 개를 WAV로 합성한다. 이 스크립트 자체가 출처다(docs/ASSETS.md 참고).
+# 반응음 여섯 개를 WAV로 합성한다. 이 스크립트 자체가 출처다(docs/ASSETS.md 참고).
 #
 # 의존성: 파이썬 표준 라이브러리뿐이다. numpy를 쓰지 않는다 -- 이 기계의 system
-# python3에도 UE 번들 python3에도 numpy가 없고(2026-09-21 확인), 소리 다섯 개
+# python3에도 UE 번들 python3에도 numpy가 없고(2026-09-21 확인), 소리 여섯 개
 # 때문에 의존성을 늘리는 것은 재현성 제1원칙에 손해다.
 #
 # 결정성: 난수를 쓰되 반드시 고정 시드의 random.Random 인스턴스만 쓴다.
@@ -75,21 +75,58 @@ def swim(rate=RATE):
 
 
 def startle(rate=RATE):
-    """「꺅」 0.22초. 700Hz에서 2200Hz로 미끄러져 올라가는 연속음 + 짧은 잡음 숨.
-    위로 올라가는 글라이드가 '놀랐다'를 만든다(내려가면 '시무룩'이 된다)."""
+    """「퍽」 0.13초. **개정 전에는 700→2200Hz로 올라가는 「꺅」이었다.** 대상 나이가
+    초등 5~6학년으로 바뀌면서 그 톤이 시나리오의 금지 목록(만화 비명)에 올랐다.
+    이제 방향이 반대다: 240Hz에서 90Hz로 **떨어지는** 짧은 몸통 소리 + 물이 밀리는
+    잡음 한 겹. 올라가면 '꺅', 내려가면 '퍽'이다 -- 이 한 줄이 유치함의 분기점이다."""
     rnd = random.Random(7)
-    n = int(0.220 * rate)
+    n = int(0.130 * rate)
     out = [0.0] * n
     phase = 0.0
+    lp = lp2 = lp3 = 0.0
     for i in range(n):
         t = i / n
-        f = 700.0 + (2200.0 - 700.0) * (t ** 0.7)
+        f = 240.0 * math.exp(-5.0 * t) + 90.0
         phase += 2.0 * math.pi * f / rate
-        env = math.exp(-3.2 * t)
-        body = math.sin(phase) + 0.30 * math.sin(2.0 * phase)
-        breath = 0.22 * rnd.uniform(-1.0, 1.0) * math.exp(-11.0 * t)
-        out[i] = env * body * 0.8 + breath
-    return fade(out, rate=rate)
+        env = math.exp(-13.0 * t)
+        body = math.sin(phase) + 0.22 * math.sin(2.0 * phase)
+        # 물이 밀리는 저역 잡음. **3극** 저역통과다 -- 계획서 원안의 1극(6dB/oct)은
+        # 고역을 그대로 남겨 무게중심이 3.2kHz였다(자기 목표 900Hz를 못 넘겼다).
+        # 가중치가 2.0인 이유: 더 키우면 잡음이 무게중심을 혼자 끌어내려, 옛 「꺅」
+        # 글라이드로 되돌리는 변이에도 측정이 900Hz 아래로 통과해 버린다(실측 857Hz).
+        # **몸통이 지배해야 이 측정이 무언가를 증명한다.**
+        w = rnd.uniform(-1.0, 1.0)
+        lp += 0.05 * (w - lp)
+        lp2 += 0.05 * (lp - lp2)
+        lp3 += 0.05 * (lp2 - lp3)
+        out[i] = env * (body * 0.85 + lp3 * 2.0)
+    return fade(out, in_s=0.001, out_s=0.008, rate=rate)
+
+
+def thud(rate=RATE):
+    """「쿵」 0.18초. 잡았을 때만 난다. startle보다 **한 옥타브 아래에서 시작하고
+    더 길다** -- 아이가 '비켰다'와 '잡았다'를 소리만으로 구분해야 하기 때문이다.
+    타격감의 나머지 9할은 화면 흔들림이 만든다(Impact.h)."""
+    rnd = random.Random(911)
+    n = int(0.180 * rate)
+    out = [0.0] * n
+    phase = 0.0
+    lp = lp2 = lp3 = 0.0
+    for i in range(n):
+        t = i / n
+        f = 120.0 * math.exp(-4.0 * t) + 52.0
+        phase += 2.0 * math.pi * f / rate
+        env = math.exp(-9.0 * t)
+        w = rnd.uniform(-1.0, 1.0)
+        lp += 0.018 * (w - lp)
+        lp2 += 0.018 * (lp - lp2)
+        lp3 += 0.018 * (lp2 - lp3)
+        # 첫 30ms의 어택이 '맞았다'를 만든다. **잡음이 아니라 낮은 과도음**이다 --
+        # 잡음 클릭은 무게중심을 4kHz까지 끌어올려 「쿵」이 아니라 「탁」이 된다.
+        click = math.exp(-26.0 * t) * math.sin(phase * 2.2) * 0.15
+        # 잡음 가중치가 3.0인 이유는 startle과 같다 -- 몸통이 지배해야 측정이 증명이 된다.
+        out[i] = env * (math.sin(phase) * 1.0 + lp3 * 3.0 + click)
+    return fade(out, in_s=0.0005, out_s=0.012, rate=rate)
 
 
 def nibble(rate=RATE):
@@ -148,6 +185,7 @@ def bubble(rate=RATE):
 SOUNDS = (
     ("S_Swim.wav", swim),
     ("S_Startle.wav", startle),
+    ("S_Thud.wav", thud),
     ("S_Nibble.wav", nibble),
     ("S_Split.wav", split),
     ("S_Bubble.wav", bubble),

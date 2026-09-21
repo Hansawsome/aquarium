@@ -15,7 +15,8 @@ class USoundBase;
 UENUM()
 enum class EAquariumCue : uint8
 {
-	Startle,   // 「꺅」 배경 물고기가 놀람
+	Startle,   // 「퍽」 배경 물고기가 놀람 (개정 전 「꺅」. 만화 비명은 유치함 신호다)
+	Thud,      // 「쿵」 몸으로 들이받아 **잡았다**
 	Nibble,    // 「뽁」 먹이를 먹음
 	Split,     // 「촤악」 무리가 갈라짐
 	Bubble,    // 「뽀글」 내 물고기 재롱
