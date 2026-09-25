@@ -6,6 +6,7 @@
 #include "FishActor.h"
 #include "FishSchoolSubsystem.h"
 #include "Tests/AutomationEditorCommon.h"
+#include "AquariumTestWorld.h"
 #include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
 #include "aquarium/Flee.h"
@@ -183,11 +184,19 @@ bool FControllerRepeatedClicks::RunTest(const FString&)
 	const bool bMovingRight = A->GetActorLocation().Y > FirstDirProbe.Y;
 	TestTrue(TEXT("first flee goes right"), bMovingRight);
 
-	// Re-click A from the OTHER side while still fleeing: must be IGNORED.
+	// Re-click A from the OTHER side while still fleeing. **M7 사양 변경**: M5의 F-11은
+	// 이것을 무시했지만 시나리오 장면 2 요구사항 4가 연타를 기본 사용법으로 못 박았다.
+	// 이제 무시하지 않고 다시 겨눈다 -- 속도가 실제로 왼쪽으로 돌아서야 한다.
 	A->ApplyFleeFrom(A->GetActorLocation() + FVector(0.f, 20.f, 0.f));
-	const double YBefore = A->GetActorLocation().Y;
-	for (int32 i = 0; i < 12; ++i) { A->StepSwim(1.f / 60.f); }
-	TestTrue(TEXT("mid-flee re-click is ignored: still going right"), A->GetActorLocation().Y > YBefore);
+	const double YReaim = A->GetActorLocation().Y;
+	A->StepSwim(1.f / 60.f);
+	const double VJustAfter = A->GetActorLocation().Y - YReaim;
+	for (int32 i = 0; i < 30; ++i) { A->StepSwim(1.f / 60.f); }
+	const double YLate = A->GetActorLocation().Y;
+	A->StepSwim(1.f / 60.f);
+	const double VLate = A->GetActorLocation().Y - YLate;
+	TestTrue(FString::Printf(TEXT("mid-flee re-click re-aims (%.4f -> %.4f cm/frame)"), VJustAfter, VLate),
+		VLate < VJustAfter);
 
 	// Click B while A is fleeing: independent.
 	TestTrue(TEXT("B untouched so far"), B->FleeState() == aquarium::BehaviorState::Normal);
@@ -276,6 +285,118 @@ bool FControllerAutoClickParses::RunTest(const FString&)
 		TEXT("-AquariumClickLog=/tmp/clicks.csv"), ClickCsvPath));
 	TestEqual(TEXT("click log path survives"), ClickCsvPath, FString(TEXT("/tmp/clicks.csv")));
 	TestFalse(TEXT("absent click log flag"), ADiverPlayerController::ParseClickLogPath(TEXT("-Other=1"), ClickCsvPath));
+	return true;
+}
+
+
+// ---------------------------------------------------------------- M8 Task 7: 돌진과 코끝
+
+namespace
+{
+// 내 물고기 한 마리. 게임 모드 없이도 되는 시험에는 이쪽이 싸고, 무엇보다
+// bPlayerControlled를 **켜 둔 채**라는 것이 의도임을 한눈에 보이게 한다.
+AFishActor* SpawnPlayerFishDirect(UWorld* World)
+{
+	FActorSpawnParameters P;
+	P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AFishActor* Fish = World->SpawnActor<AFishActor>(AFishActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, P);
+	Fish->Seed = 11u;
+	Fish->PlaneOrigin = FVector(220.f, 0.f, 105.f);
+	Fish->PlaneHalfWidth = 300.f;
+	Fish->PlaneHalfHeight = 150.f;
+	Fish->MaxSpeed = 90.f;
+	Fish->Accel = 140.f;
+	Fish->Decel = 180.f;
+	Fish->bIsPlayerFish = true;
+	Fish->bPlayerControlled = true;
+	if (USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Fish/BlueTang/SK_BlueTang.SK_BlueTang")))
+	{
+		Fish->SetMesh(Mesh);
+	}
+	Fish->InitializeSwim();
+	return Fish;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishDashRaisesSpeed, "Aquarium.Fish.DashRaisesSpeed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFishDashRaisesSpeed::RunTest(const FString&)
+{
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnPlayerFishDirect(World);
+	if (!TestNotNull(TEXT("player fish"), Fish)) return false;
+	// 위쪽으로 달린다: 가로 벽(PlaneHalfWidth 300)보다 세로가 짧지만, 아래에서
+	// 위로 105 cm 안쪽이라 240 스텝(4초) 동안 벽에 닿지 않고 평속에 도달한다.
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));
+	for (int32 i = 0; i < 60; ++i) { Fish->StepSwim(1.f / 60.f); }
+	const float Cruise = Fish->CurrentSpeed();
+	TestTrue(FString::Printf(TEXT("cruising (%.2f cm/s)"), Cruise), Cruise > 1.f);
+	Fish->PressDash();
+	Fish->StepSwim(1.f / 60.f);
+	Fish->StepSwim(1.f / 60.f);
+	TestTrue(FString::Printf(TEXT("dash is faster than cruising (%.2f > %.2f)"), Fish->CurrentSpeed(), Cruise * 1.05f),
+		Fish->CurrentSpeed() > Cruise * 1.05f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishDashNeverRefuses, "Aquarium.Fish.DashNeverRefuses",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFishDashNeverRefuses::RunTest(const FString&)
+{
+	// 연타는 이 나이대의 기본 사용법이다(F-11에서 배운 것). 여덟 번 연타해도
+	// 매번 무언가는 일어나야 한다 -- 쿨다운이 입력을 씹으면 '고장났다'로 읽힌다.
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnPlayerFishDirect(World);
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));
+	for (int32 i = 0; i < 60; ++i) { Fish->StepSwim(1.f / 60.f); }
+	const float Cruise = Fish->CurrentSpeed();
+	for (int32 i = 0; i < 8; ++i)
+	{
+		const int32 PressesBefore = Fish->DashPressCount();
+		Fish->PressDash();
+		TestEqual(TEXT("the press is never swallowed"), Fish->DashPressCount(), PressesBefore + 1);
+		Fish->StepSwim(1.f / 60.f);
+		TestTrue(*FString::Printf(TEXT("press %d still does something (%.2f > %.2f)"), i, Fish->CurrentSpeed(), Cruise),
+			Fish->CurrentSpeed() > Cruise);
+		for (int32 k = 0; k < 3; ++k) { Fish->StepSwim(1.f / 60.f); }
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFishNoseIsAheadOfBody, "Aquarium.Fish.NoseIsAheadOfBody",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFishNoseIsAheadOfBody::RunTest(const FString&)
+{
+	// 코끝은 몸 중심보다 진행 방향 쪽에 있고, 몸 반길이를 넘지 않는다.
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	AFishActor* Fish = SpawnPlayerFishDirect(World);
+	Fish->SetInputDirection(FVector2D(1.f, 0.f));
+	for (int32 i = 0; i < 60; ++i) { Fish->StepSwim(1.f / 60.f); }
+	// 이 시험이 무언가를 보고 있다는 증거: 물고기는 실제로 움직이고 있고 몸도 있다.
+	TestTrue(TEXT("the fish is actually moving"), Fish->CurrentSpeed() > 1.f);
+	const aquarium::ClickTarget Body = Fish->AsClickTarget();
+	TestTrue(TEXT("the body has a size"), Body.halfWidth > 0.f);
+	const aquarium::Vec2 Nose = Fish->NosePoint();
+	TestTrue(FString::Printf(TEXT("nose leads the centre (%.3f > %.3f)"), Nose.x, Body.center.x),
+		Nose.x > Body.center.x);
+	TestTrue(TEXT("nose is on the body"), Nose.x - Body.center.x <= Body.halfWidth + 0.01f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FControllerDashKeyIsBound, "Aquarium.Controller.DashKeyIsBound",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FControllerDashKeyIsBound::RunTest(const FString&)
+{
+	// 스페이스가 실제로 물고기까지 도달하는지. 컨트롤러의 공개 진입점을 직접 부른다
+	// (-nullrhi에는 실제 키 이벤트가 없다 -- 클릭과 같은 사정이다).
+	AquariumTest::FWorld W;
+	AFishActor* Fish = W.BeginSession();
+	if (!TestNotNull(TEXT("player fish"), Fish)) return false;
+	ADiverPlayerController* PC = W.Get()->SpawnActor<ADiverPlayerController>();
+	if (!TestNotNull(TEXT("controller"), PC)) return false;
+	const int32 Before = Fish->DashPressCount();
+	PC->HandleDashPressed();
+	TestEqual(TEXT("the press reached the fish"), Fish->DashPressCount(), Before + 1);
 	return true;
 }
 

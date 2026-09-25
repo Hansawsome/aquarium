@@ -35,6 +35,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Session") FVector2D RequestedPlaneHalfExtents = FVector2D(130.f, 65.f);
 	UPROPERTY(VisibleAnywhere, Category = "Session") float PlaneHalfWidth = 130.f;
 	UPROPERTY(VisibleAnywhere, Category = "Session") float PlaneHalfHeight = 65.f;
+	// FitSwimPlaneToViewport가 실제로 쓴 값. 기포의 소멸 높이가 이것에서 파생되므로
+	// 시야각·화면 비율을 두 번 읽지 않는다.
+	UPROPERTY(VisibleAnywhere, Category = "Session") float ViewFovDeg = 75.f;
+	UPROPERTY(VisibleAnywhere, Category = "Session") float ViewAspect = 16.f / 9.f;
 	// The player's fish is normalized to this body length (cm) whatever species the session
 	// assigns: the catalog spans 9 cm (Damselfish) to 32 cm (BlueTang), so at native scale a
 	// small assignment reads SMALLER than the background fish. Combined with the nearer plane
@@ -69,6 +73,11 @@ public:
 	// DistanceCm * tan(Fov/2) with a small inset, the half height that divided by AspectRatio;
 	// the result is the component-wise minimum against the request, floored so it stays usable.
 	static FVector2D FitPlaneToView(float DistanceCm, float HorizontalFovDeg, float AspectRatio, FVector2D RequestedHalfExtents);
+	// 주어진 깊이에서 **실제로 보이는** 반 크기(여백 없음). FitPlaneToView가 쓰는
+	// 것과 같은 식이며, 같은 공식을 두 번 적지 않으려고 여기로 뺐다(규약 7).
+	static FVector2D VisibleHalfExtents(float DistanceCm, float HorizontalFovDeg, float AspectRatio);
+	// 그 깊이에서 화면 위 끝의 월드 Z. 기포가 사라지는 높이가 여기서 파생된다.
+	float ScreenTopZAt(float DepthCm) const;
 
 	// Sets PlaneHalfWidth/PlaneHalfHeight from RequestedPlaneHalfExtents, the live viewport aspect
 	// and the DiverCamera FOV. Idempotent: it always fits the authored request, never the current

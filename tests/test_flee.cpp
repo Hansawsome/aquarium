@@ -34,13 +34,17 @@ TEST_CASE("state machine walks flee -> recover -> normal on time boundaries") {
     REQUIRE(m.State() == BehaviorState::Normal);
 }
 
-TEST_CASE("touch during flee is ignored; touch during recover restarts flee") {
+TEST_CASE("re-touch mid-flee re-aims (M7: F-11's ignore was removed on purpose)") {
+    // M5까지는 이 테스트가 '무시된다'를 단언했다. 시나리오(장면 2 요구사항 4)가
+    // 연타를 기본 사용법으로 못 박으면서 사양이 뒤집혔다. 기록을 남기려고 지우지
+    // 않고 뒤집어 둔다.
     FleeStateMachine m;
     m.Touch({0.f, 0.f}, {10.f, 0.f}, {0.f, 0.f}, {0.f, 1.f}, kP);
     m.Step(0.4f);
-    m.Touch({0.f, 0.f}, {-10.f, 0.f}, {0.f, 0.f}, {0.f, 1.f}, kP);   // ignored
-    REQUIRE(m.FleeDirection().x == Approx(1.f));                      // unchanged
-    m.Step(0.4f);                                                     // total 0.8 -> Recovering
+    m.Touch({20.f, 0.f}, {10.f, 0.f}, {0.f, 0.f}, {0.f, 1.f}, kP);   // 이제는 다시 겨눈다
+    REQUIRE(m.FleeDirection().x == Approx(-1.f));                     // 새 클릭에서 멀어진다
+    REQUIRE(m.TouchCount() == 2);                                     // 삼킨 클릭이 없다
+    m.Step(0.8f);                                                     // 타이머가 새로 찼다 -> Recovering
     REQUIRE(m.State() == BehaviorState::Recovering);
     m.Touch({20.f, 0.f}, {10.f, 0.f}, {0.f, 0.f}, {0.f, 1.f}, kP);   // restart
     REQUIRE(m.State() == BehaviorState::Fleeing);

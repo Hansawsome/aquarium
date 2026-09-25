@@ -64,6 +64,11 @@ public:
 	// Parses -AquariumAutoInput=<pattern>; false when absent or empty. Dev-only scripted arrow-key
 	// playback, e.g. "R3,U2,L3,D2,0 1".
 	static bool ParseAutoInput(const TCHAR* CmdLine, FString& OutPattern);
+	// Parses -AquariumAutoDash=<period seconds>; false when absent or not a positive number.
+	// Dev-only: presses the dash key every <period> seconds so a capture can contrast
+	// "aimless swimming" against "swimming WITH the dash". Nothing else can script the space
+	// bar -- a capture run has no real key events.
+	static bool ParseAutoDash(const TCHAR* CmdLine, float& OutPeriodSeconds);
 
 	// One scripted click: when, and where in the viewport (0..1 of width/height).
 	struct FAutoClick
@@ -83,6 +88,13 @@ public:
 	// only verification the deprojection path ever gets: -nullrhi has no game viewport, so
 	// automation can only start at HandleClickRay.
 	static bool ParseClickLogPath(const TCHAR* CmdLine, FString& OutPath);
+
+	// 스페이스. 공개인 이유는 클릭과 같다: -nullrhi에는 실제 키 이벤트가 없어
+	// 자동화가 여기서 시작해야 한다.
+	void HandleDashPressed();
+
+	// 테스트 진입점. Tick에서 부르는 것과 같은 함수다.
+	void TickCameraShakeForTest(float DeltaSeconds) { ApplyCameraShake(DeltaSeconds); }
 
 protected:
 	virtual void BeginPlay() override;
@@ -122,6 +134,19 @@ private:
 	bool HandleClickAt(const FVector2D& ViewportPos);
 	void StartAutoInputIfRequested();
 	AAquariumGameMode* GameMode() const;
+	// 흔들리기 전의 카메라 자리. 오프셋을 **더했다 빼는** 것이 아니라 언제나
+	// 기준 + 오프셋으로 다시 놓는다. 누적 오차가 남으면 카메라가 한 판 내내
+	// 조금씩 흘러가고, 그것은 P-06(카메라는 물고기를 따라가지 않는다) 위반이다.
+	FVector CameraBaseLocation = FVector::ZeroVector;
+	bool bHasCameraBase = false;
+	UPROPERTY() TObjectPtr<class ACameraActor> ShakeCamera = nullptr;
+	UPROPERTY() TObjectPtr<class UMaterialInstanceDynamic> DisplacementMid = nullptr;
+	bool bDisplacementInstalled = false;
+	// BeginPlay가 돌지 않은 월드(자동화)에서도 동작하도록 **게으르게** 찾는다.
+	void EnsureShakeCamera();
+	void ApplyCameraShake(float DeltaSeconds);
+	// 그 깊이에서 기포가 사라지는 월드 Z. 화면 위 끝에서 파생한다.
+	float BubbleTopZAt(float DepthCm);
 	void StartAutoReplayIfRequested();
 	void StartUiCaptureIfRequested();
 	void ApplyAssignmentSeedIfRequested();
@@ -141,6 +166,11 @@ private:
 	};
 	TArray<FAutoInputStep> AutoInputSteps;
 	float AutoInputElapsed = 0.f;
+	// Dev-only scripted dash: period in seconds (<=0 means off) and the time since the last press.
+	float AutoDashPeriod = 0.f;
+	float AutoDashElapsed = 0.f;
+	void StartAutoDashIfRequested();
+	void AdvanceAutoDash(float DeltaSeconds);
 	// Overwrites ArrowKeys from the scripted pattern; no-op when no pattern was given.
 	void AdvanceAutoInput(float DeltaSeconds);
 	// Parses "R3,U2,0 1" into steps; malformed entries are skipped with a warning.

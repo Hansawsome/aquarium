@@ -1,5 +1,8 @@
 #include "DiverPlayerController.h"
 
+#include "AquariumAudioSubsystem.h"
+#include "BubbleSubsystem.h"
+
 #include "FishSchoolSubsystem.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
@@ -12,6 +15,10 @@
 #include "Misc/Parse.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
+#include "Camera/CameraComponent.h"
+#include "CatchSubsystem.h"
 #include "FishActor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/Engine.h"
@@ -63,6 +70,24 @@ void ADiverPlayerController::BeginPlay()
 	}
 	Entry->OnSubmitted.BindUObject(this, &ADiverPlayerController::HandleSubmitted);
 	Hud->OnExit.BindUObject(this, &ADiverPlayerController::RequestExit);
+	Hud->OnToggleMute.BindLambda([this]()
+	{
+		if (UWorld* W = GetWorld())
+		{
+			if (UAquariumAudioSubsystem* Audio = W->GetSubsystem<UAquariumAudioSubsystem>())
+			{
+				Audio->ToggleMuted();
+			}
+		}
+	});
+	// 명령줄 -AquariumMuted로 켜진 상태라면 그림도 그 상태로 시작해야 한다.
+	if (UWorld* W = GetWorld())
+	{
+		if (UAquariumAudioSubsystem* Audio = W->GetSubsystem<UAquariumAudioSubsystem>())
+		{
+			Hud->SetMutedVisual(Audio->IsMuted());
+		}
+	}
 	Entry->AddToViewport(kEntryZOrder);
 	Hud->AddToViewport(kHudZOrder);
 	ShowEntry();
@@ -71,6 +96,7 @@ void ADiverPlayerController::BeginPlay()
 	StartUiCaptureIfRequested();
 	StartFrameStatsIfRequested();
 	StartAutoInputIfRequested();
+	StartAutoDashIfRequested();
 	StartAutoClickIfRequested();
 	StartClickLogIfRequested();
 
@@ -128,6 +154,15 @@ void ADiverPlayerController::ApplyInputToPlayerFish(float DeltaSeconds)
 		return;
 	}
 	Fish->SetInputDirection(DirectionFor(ArrowKeys));
+	// 장면 1: 방향키를 누르는 순간 물살 소리가 나고, 빠를수록 음이 올라간다.
+	// 소리 규칙 자체는 규칙 계층에 있고, 여기서는 속도를 건네줄 뿐이다.
+	if (UWorld* W = GetWorld())
+	{
+		if (UAquariumAudioSubsystem* Audio = W->GetSubsystem<UAquariumAudioSubsystem>())
+		{
+			Audio->UpdateSwim(Fish->CurrentSpeed(), Fish->MaxSpeed, DeltaSeconds);
+		}
+	}
 }
 
 void ADiverPlayerController::HandleClick()
@@ -135,7 +170,7 @@ void ADiverPlayerController::HandleClick()
 	// The HUD exit button sits on top of the scene; a click that the button is taking must not
 	// also startle whatever fish happens to be behind it. Slate handles the button itself, but
 	// under FInputModeGameAndUI the key still reaches us, so this guard is ours to make.
-	if (Hud && Hud->IsPointerOverExitButton())
+	if (Hud && Hud->IsPointerOverButton())
 	{
 		return;
 	}
@@ -203,8 +238,39 @@ bool ADiverPlayerController::HandleClickRay(const FVector& RayOrigin, const FVec
 	case aquarium::BehaviorState::Recovering: LastClickState = TEXT("Recovering"); break;
 	default:                                  LastClickState = TEXT("Normal"); break;
 	}
+	const bool bOwnFish = (Fish == GM->PlayerFish());
 	Fish->ApplyFleeFrom(Hit);   // exactly one fish per click
+	if (UWorld* WW = GetWorld())
+	{
+		if (UAquariumAudioSubsystem* Audio = WW->GetSubsystem<UAquariumAudioSubsystem>())
+		{
+			// 내 물고기는 「뽀글」, 남의 물고기는 「꺅」. 아이가 소리만으로 구분한다.
+			Audio->PlayCue(bOwnFish ? EAquariumCue::Bubble : EAquariumCue::Startle,
+				static_cast<uint32>(FMath::Rand()));
+		}
+		if (UBubbleSubsystem* Bubbles = WW->GetSubsystem<UBubbleSubsystem>())
+		{
+			// **이 클릭이 맞힌 깊이**에서 화면 위 끝을 구한다. 계획은 플레이어
+			// 평면 하나로 계산했는데, 배경 물고기는 X 330~700에 있고 플레이어
+			// 평면은 X 220이라 깊은 물고기의 기포가 화면 1/3 높이에서 사라졌을
+			// 것이다 -- 시선의 약속이 정확히 여기서 깨진다.
+			Bubbles->Spawn(Hit, bOwnFish ? 5 : 9, static_cast<uint32>(FMath::Rand()),
+				BubbleTopZAt(static_cast<float>(Hit.X)));
+		}
+	}
 	return true;
+}
+
+float ADiverPlayerController::BubbleTopZAt(float DepthCm)
+{
+	// 기포가 사라지는 높이는 **카메라와 그 깊이에서 파생**한다. 여기에 숫자를
+	// 적으면 M3이 화면 비율에 맞춰 유영 평면을 정하는 규칙과 어긋나게 되고,
+	// 그 어긋남은 "기포가 화면 중간에서 사라진다"로만 드러난다.
+	if (AAquariumGameMode* GM = GameMode())
+	{
+		return GM->ScreenTopZAt(DepthCm);
+	}
+	return 400.f;
 }
 
 void ADiverPlayerController::Tick(float DeltaSeconds)
@@ -212,9 +278,19 @@ void ADiverPlayerController::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 #if !UE_BUILD_SHIPPING
 	AdvanceAutoInput(DeltaSeconds);
+	AdvanceAutoDash(DeltaSeconds);
 	AdvanceAutoClick(DeltaSeconds);
 #endif
 	ApplyInputToPlayerFish(DeltaSeconds);
+	ApplyCameraShake(DeltaSeconds);
+	// 화면 구석의 숫자. 오르기만 하고, 내리는 경로가 HudWidget에 없다.
+	if (Hud)
+	{
+		if (UCatchSubsystem* CatchSub = GetWorld() ? GetWorld()->GetSubsystem<UCatchSubsystem>() : nullptr)
+		{
+			Hud->SetCatchCount(CatchSub->StampCount());
+		}
+	}
 #if !UE_BUILD_SHIPPING
 	// One UI-inclusive screenshot per tick: with -benchmark -fps=N the timestep is fixed, so the
 	// frame index maps to N frames per second. -dumpmovie cannot be used for this because the
@@ -272,6 +348,8 @@ void ADiverPlayerController::SetupInputComponent()
 		// click of a fast double click, so binding the double click as well would make one
 		// physical click of a mashing child count twice.
 		InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ADiverPlayerController::HandleClick);
+		// 돌진. 아이의 손은 빠르므로 연타가 기본 사용법이고, DashDrive는 거절하지 않는다.
+		InputComponent->BindKey(EKeys::SpaceBar, IE_Pressed, this, &ADiverPlayerController::HandleDashPressed);
 	}
 }
 
@@ -372,6 +450,73 @@ void ADiverPlayerController::RequestExit()
 		}
 		GM->EndSession();
 		ShowEntry();
+	}
+}
+
+void ADiverPlayerController::HandleDashPressed()
+{
+	if (AAquariumGameMode* GM = GameMode())
+	{
+		if (AFishActor* Fish = GM->PlayerFish())
+		{
+			Fish->PressDash();
+		}
+	}
+}
+
+void ADiverPlayerController::EnsureShakeCamera()
+{
+	if (ShakeCamera == nullptr)
+	{
+		TArray<AActor*> Cameras;
+		UGameplayStatics::GetAllActorsOfClassWithTag(GetWorld(), ACameraActor::StaticClass(),
+			FName(TEXT("DiverCamera")), Cameras);
+		if (Cameras.Num() > 0)
+		{
+			ShakeCamera = Cast<ACameraActor>(Cameras[0]);
+		}
+	}
+	if (ShakeCamera == nullptr || bDisplacementInstalled) return;
+	// 물 밀림 왜곡은 **카메라 컴포넌트의 블렌더블**이다. 레벨에 PostProcessVolume을
+	// 넣으면 ReefM1.umap이 바뀌어 verify_scene.py의 기대값이 흔들린다.
+	if (UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Fx/M_WaterPush.M_WaterPush")))
+	{
+		DisplacementMid = UMaterialInstanceDynamic::Create(Base, this);
+		if (DisplacementMid)
+		{
+			DisplacementMid->SetScalarParameterValue(TEXT("Strength"), 0.f);
+			if (UCameraComponent* Cc = ShakeCamera->GetCameraComponent())
+			{
+				// 블렌더블은 **한 번만** 넣는다. 매 틱 AddBlendable을 부르면 배열이 자란다.
+				Cc->PostProcessSettings.AddBlendable(DisplacementMid, 1.f);
+				Cc->PostProcessBlendWeight = 1.f;
+			}
+		}
+	}
+	bDisplacementInstalled = true;
+}
+
+void ADiverPlayerController::ApplyCameraShake(float DeltaSeconds)
+{
+	UWorld* W = GetWorld();
+	UCatchSubsystem* CatchSub = W ? W->GetSubsystem<UCatchSubsystem>() : nullptr;
+	if (CatchSub == nullptr) return;
+	EnsureShakeCamera();
+	if (ShakeCamera == nullptr) return;
+	if (!bHasCameraBase)
+	{
+		CameraBaseLocation = ShakeCamera->GetActorLocation();
+		bHasCameraBase = true;
+	}
+	const aquarium::ShakeOffset O = CatchSub->Shake().Offset(CatchSub->ShakeParams());
+	// 언제나 기준 + 오프셋이다. 누적하지 않으므로 흔들림이 끝나면 **정확히** 제자리다.
+	ShakeCamera->SetActorLocation(CameraBaseLocation + FVector(0.f, O.y, O.z));
+
+	if (DisplacementMid)
+	{
+		// 같은 수명을 따르되 진동하지 않는다. 깜빡이면 화면이 지글거린다.
+		DisplacementMid->SetScalarParameterValue(TEXT("Strength"),
+			CatchSub->Shake().DisplacementWeight(CatchSub->ShakeParams()));
 	}
 }
 
@@ -597,6 +742,50 @@ void ADiverPlayerController::StartAutoInputIfRequested()
 	if (AutoInputSteps.Num() == 0)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AquariumAutoInput: no usable entries; scripted input disabled"));
+	}
+#endif
+}
+
+bool ADiverPlayerController::ParseAutoDash(const TCHAR* CmdLine, float& OutPeriodSeconds)
+{
+	OutPeriodSeconds = 0.f;
+	FString Value;
+	if (!CmdLine || !FParse::Value(CmdLine, TEXT("-AquariumAutoDash="), Value))
+	{
+		return false;
+	}
+	Value.TrimStartAndEndInline();
+	const float Period = FCString::Atof(*Value);
+	if (Value.IsEmpty() || !(Period > 0.f))
+	{
+		return false;
+	}
+	OutPeriodSeconds = Period;
+	return true;
+}
+
+void ADiverPlayerController::StartAutoDashIfRequested()
+{
+#if !UE_BUILD_SHIPPING
+	AutoDashPeriod = 0.f;
+	AutoDashElapsed = 0.f;
+	if (ParseAutoDash(FCommandLine::Get(), AutoDashPeriod))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AquariumAutoDash: armed every %.2f s"), AutoDashPeriod);
+	}
+#endif
+}
+
+void ADiverPlayerController::AdvanceAutoDash(float DeltaSeconds)
+{
+#if !UE_BUILD_SHIPPING
+	if (!(AutoDashPeriod > 0.f)) return;
+	AutoDashElapsed += DeltaSeconds;
+	while (AutoDashElapsed >= AutoDashPeriod)
+	{
+		AutoDashElapsed -= AutoDashPeriod;
+		// 실제 키와 **같은 함수**를 통과한다. 캡처가 검증하는 경로가 아이가 쓰는 경로다.
+		HandleDashPressed();
 	}
 #endif
 }
